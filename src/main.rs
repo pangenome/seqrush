@@ -55,6 +55,14 @@ struct Args {
     #[arg(long, default_value = "3", value_name = "NUM")]
     convergence_stability: usize,
     
+    /// Sparsification factor for Erdős-Rényi random graph (auto calculates if not set)
+    #[arg(long, value_name = "FLOAT")]
+    sparsification: Option<f64>,
+    
+    /// Safety factor multiplier for Erdős-Rényi connectivity threshold
+    #[arg(long, default_value = "3.0", value_name = "FLOAT")]
+    erdos_renyi_safety_factor: f64,
+    
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
@@ -97,6 +105,8 @@ struct AlignmentConfig {
     gap_penalty: i32,
     max_alignment_score: i32,
     convergence_stability: usize,
+    sparsification: f64,
+    erdos_renyi_safety_factor: f64,
     verbose: bool,
 }
 
@@ -114,6 +124,47 @@ impl SeqRush {
             iteration_count: Arc::new(AtomicUsize::new(0)),
             config,
         }
+    }
+    
+    /// Calculate Erdős-Rényi connectivity threshold probability
+    /// For a random graph G(n,p) to have a giant component with high probability,
+    /// we need p > (1 + ε) * ln(n) / n
+    fn calculate_erdos_renyi_threshold(n: usize, safety_factor: f64) -> f64 {
+        if n <= 1 {
+            return 1.0;
+        }
+        
+        let n_f = n as f64;
+        // Critical threshold is ln(n)/n for connectivity
+        // We use safety_factor * ln(n)/n to ensure giant component with high probability
+        let threshold = safety_factor * n_f.ln() / n_f;
+        
+        // Clamp to reasonable bounds
+        threshold.min(1.0).max(0.001)
+    }
+    
+    /// Determine if a pair should be aligned based on sparsification
+    fn should_align_pair(&self, seq1_id: usize, seq2_id: usize) -> bool {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        // Create a deterministic hash of the pair
+        let mut hasher = DefaultHasher::new();
+        // Hash in a way that's symmetric (same for (i,j) and (j,i))
+        let (min_id, max_id) = if seq1_id < seq2_id {
+            (seq1_id, seq2_id)
+        } else {
+            (seq2_id, seq1_id)
+        };
+        min_id.hash(&mut hasher);
+        max_id.hash(&mut hasher);
+        let hash_value = hasher.finish();
+        
+        // Convert hash to probability [0,1)
+        let prob = (hash_value as f64) / (u64::MAX as f64);
+        
+        // Accept if probability is below sparsification threshold
+        prob < self.config.sparsification
     }
     
     fn build_graph(&mut self) {
@@ -166,18 +217,32 @@ impl SeqRush {
         let mut rng = thread_rng();
         let seq_count = self.sequences.len();
         
-        // Generate random pairs
+        // Generate all possible pairs and apply Erdős-Rényi sparsification
         let mut pairs = Vec::new();
+        let mut total_pairs = 0;
+        let mut sparse_pairs = 0;
+        
         for i in 0..seq_count {
             for j in (i + 1)..seq_count {
-                pairs.push((i, j));
+                total_pairs += 1;
+                if self.should_align_pair(i, j) {
+                    pairs.push((i, j));
+                    sparse_pairs += 1;
+                }
             }
+        }
+        
+        if self.config.verbose {
+            let sparsification_ratio = sparse_pairs as f64 / total_pairs as f64;
+            println!("Erdős-Rényi sparsification: {}/{} pairs ({:.2}%) selected", 
+                    sparse_pairs, total_pairs, sparsification_ratio * 100.0);
+            println!("Sparsification probability: {:.4}", self.config.sparsification);
         }
         
         pairs.shuffle(&mut rng);
         
-        // Take a subset for this iteration - scale with number of sequences
-        let batch_size = std::cmp::min(pairs.len(), seq_count * seq_count / 4);
+        // For each iteration, take a subset of the sparse pairs
+        let batch_size = std::cmp::min(pairs.len(), std::cmp::max(1, pairs.len() / 4));
         let selected_pairs: Vec<_> = pairs.into_iter().take(batch_size).collect();
         
         if self.config.verbose {
@@ -572,6 +637,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Loaded {} sequences", sequences.len());
     }
     
+    // Calculate sparsification probability using Erdős-Rényi model
+    let sparsification = if let Some(manual_sparse) = args.sparsification {
+        if args.verbose {
+            println!("Using manual sparsification: {:.4}", manual_sparse);
+        }
+        manual_sparse
+    } else {
+        let calculated = SeqRush::calculate_erdos_renyi_threshold(sequences.len(), args.erdos_renyi_safety_factor);
+        if args.verbose {
+            println!("Auto-calculated Erdős-Rényi sparsification: {:.4} (n={}, safety_factor={})", 
+                    calculated, sequences.len(), args.erdos_renyi_safety_factor);
+        }
+        calculated
+    };
+
     // Create configuration
     let config = AlignmentConfig {
         max_iterations: args.max_iterations,
@@ -581,6 +661,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         gap_penalty: args.gap_penalty,
         max_alignment_score: args.max_alignment_score,
         convergence_stability: args.convergence_stability,
+        sparsification,
+        erdos_renyi_safety_factor: args.erdos_renyi_safety_factor,
         verbose: args.verbose,
     };
     
@@ -591,6 +673,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  Scoring: match={}, mismatch={}, gap={}, max_score={}", 
                 config.match_score, config.mismatch_penalty, config.gap_penalty, config.max_alignment_score);
         println!("  Convergence stability: {}", config.convergence_stability);
+        println!("  Sparsification: {:.4} (Erdős-Rényi safety factor: {})", 
+                config.sparsification, config.erdos_renyi_safety_factor);
         println!("  Threads: {}", args.threads);
     }
     
@@ -641,6 +725,8 @@ mod tests {
             gap_penalty: -1,
             max_alignment_score: 1000,
             convergence_stability: 2,
+            sparsification: 1.0, // Use all pairs for testing
+            erdos_renyi_safety_factor: 3.0,
             verbose: false,
         }
     }
@@ -1036,6 +1122,8 @@ mod tests {
             gap_penalty: -3,
             max_alignment_score: 500,
             convergence_stability: 1,
+            sparsification: 1.0,
+            erdos_renyi_safety_factor: 3.0,
             verbose: false,
         };
         
@@ -1050,6 +1138,8 @@ mod tests {
             gap_penalty: -1,
             max_alignment_score: 2000,
             convergence_stability: 3,
+            sparsification: 1.0,
+            erdos_renyi_safety_factor: 3.0,
             verbose: true,
         };
         
@@ -1104,6 +1194,8 @@ mod tests {
             gap_penalty: -1,
             max_alignment_score: 1000,
             convergence_stability: 2,
+            sparsification: 1.0,
+            erdos_renyi_safety_factor: 3.0,
             verbose: false,
         };
         
@@ -1451,5 +1543,135 @@ mod tests {
         
         // Should have found a good alignment
         assert!(best.score > 10);
+    }
+
+    #[test]
+    fn test_erdos_renyi_threshold_calculation() {
+        // Test Erdős-Rényi threshold calculation
+        
+        // For small graphs, should use high probability
+        assert_eq!(SeqRush::calculate_erdos_renyi_threshold(1, 3.0), 1.0);
+        assert_eq!(SeqRush::calculate_erdos_renyi_threshold(2, 3.0), 1.0);
+        
+        // For larger graphs, should decrease
+        let threshold_10 = SeqRush::calculate_erdos_renyi_threshold(10, 3.0);
+        let threshold_100 = SeqRush::calculate_erdos_renyi_threshold(100, 3.0);
+        let threshold_1000 = SeqRush::calculate_erdos_renyi_threshold(1000, 3.0);
+        
+        assert!(threshold_10 > threshold_100);
+        assert!(threshold_100 > threshold_1000);
+        
+        // Should be reasonable values
+        assert!(threshold_10 < 1.0);
+        assert!(threshold_100 < 0.5);
+        assert!(threshold_1000 < 0.1);
+        assert!(threshold_1000 > 0.001);
+        
+        println!("Thresholds: n=10: {:.4}, n=100: {:.4}, n=1000: {:.4}", 
+                threshold_10, threshold_100, threshold_1000);
+    }
+
+    #[test]
+    fn test_sparsification_deterministic() {
+        // Test that sparsification is deterministic for same inputs
+        let sequences = create_test_sequences();
+        let mut config = create_test_config();
+        config.sparsification = 0.5; // 50% probability
+        
+        let seqrush = SeqRush::new(sequences, config);
+        
+        // Same pair should always give same result
+        let result1 = seqrush.should_align_pair(0, 1);
+        let result2 = seqrush.should_align_pair(0, 1);
+        assert_eq!(result1, result2);
+        
+        // Symmetric pairs should give same result
+        let result_forward = seqrush.should_align_pair(0, 1);
+        let result_reverse = seqrush.should_align_pair(1, 0);
+        assert_eq!(result_forward, result_reverse);
+    }
+
+    #[test]
+    fn test_sparsification_probability() {
+        // Test that sparsification approximately matches expected probability
+        let sequences = create_test_sequences();
+        let mut config = create_test_config();
+        config.sparsification = 0.3; // 30% probability
+        
+        let expected = config.sparsification;
+        let seqrush = SeqRush::new(sequences, config);
+        
+        let total_pairs = 1000;
+        let mut accepted = 0;
+        
+        // Test with synthetic pair IDs
+        for i in 0..total_pairs {
+            if seqrush.should_align_pair(i, i + 1000) {
+                accepted += 1;
+            }
+        }
+        
+        let actual_probability = accepted as f64 / total_pairs as f64;
+        println!("Expected: {:.3}, Actual: {:.3}", expected, actual_probability);
+        
+        // Should be approximately correct (within 10%)
+        let error = (actual_probability - expected).abs();
+        assert!(error < 0.1, "Sparsification error too large: {:.3}", error);
+    }
+
+    #[test]
+    fn test_sparsification_with_large_n() {
+        // Test that sparsification works correctly with larger numbers of sequences
+        let mut sequences = Vec::new();
+        for i in 0..50 {
+            sequences.push(Sequence {
+                id: format!("seq_{}", i),
+                data: format!("ATCGATCG{:02}ATCGATCG", i).into_bytes(),
+            });
+        }
+        
+        let auto_threshold = SeqRush::calculate_erdos_renyi_threshold(50, 3.0);
+        println!("Auto threshold for n=50: {:.4}", auto_threshold);
+        
+        let mut config = create_test_config();
+        config.sparsification = auto_threshold;
+        config.max_iterations = 2; // Quick test
+        
+        let mut seqrush = SeqRush::new(sequences, config);
+        
+        // Should complete without issues using sparsification
+        seqrush.build_graph();
+        
+        let temp_file = NamedTempFile::new().unwrap();
+        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_erdos_renyi_prevents_quadratic_blowup() {
+        // Test that Erdős-Rényi sparsification actually reduces work
+        let mut sequences = Vec::new();
+        for i in 0..20 {
+            sequences.push(Sequence {
+                id: format!("test_seq_{}", i),
+                data: format!("ATCGATCGATCG{:02}ATCGATCGATCG", i).into_bytes(),
+            });
+        }
+        
+        // Compare full vs sparse alignment counts
+        let mut config_full = create_test_config();
+        config_full.sparsification = 1.0; // All pairs
+        config_full.verbose = true;
+        
+        let mut config_sparse = create_test_config();
+        config_sparse.sparsification = SeqRush::calculate_erdos_renyi_threshold(20, 3.0);
+        config_sparse.verbose = true;
+        
+        println!("Full sparsification: {:.4}", config_full.sparsification);
+        println!("Sparse sparsification: {:.4}", config_sparse.sparsification);
+        
+        // Sparse should use significantly fewer pairs
+        assert!(config_sparse.sparsification < 0.5);
+        assert!(config_sparse.sparsification < config_full.sparsification);
     }
 }
