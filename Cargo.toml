@@ -1,0 +1,19 @@
+[package]
+name = "seqrush"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# wfa2 = { git = "https://github.com/AndreaGuarracino/lib_wfa2", branch = "main" }
+union-find = "0.3"
+uf_rush = "0.2"
+rayon = "1.7"
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3.0"
+assert_fs = "1.0"
+predicates = "3.0"
