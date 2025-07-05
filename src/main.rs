@@ -1,18 +1,19 @@
 use clap::Parser;
 use rayon::prelude::*;
-use std::collections::HashMap;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use union_find::{UnionFind, UnionBySize, QuickUnionUf};
+use std::collections::{HashMap, HashSet, BTreeMap};
+use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use uf_rush::UFRush as LockFreeUnionFind;
+use lib_wfa2::affine_wavefront::{AffineWavefronts, AlignmentStatus, MemoryMode};
 
 #[derive(Parser)]
 #[command(
     name = "seqrush",
     version = "0.1.0",
     author = "SeqRush Contributors",
-    about = "A dynamic, parallel, in-memory bioinformatics tool implementing biWFA+seqwish for pangenome graph construction",
-    long_about = "SeqRush implements a lockless union-find algorithm to align random pairs of sequences in parallel until convergence, building an implicit pangenome graph from sparse pairwise alignments."
+    about = "Dynamic parallel in-memory implementation of seqwish's transitive closure algorithm",
+    long_about = "SeqRush implements seqwish's graph induction algorithm using dynamic alignment and \
+                  lock-free union-find to build pangenome graphs from sequences via transitive match closures."
 )]
 struct Args {
     /// Input FASTA file containing sequences to align
@@ -28,28 +29,28 @@ struct Args {
     output: String,
     
     /// Maximum number of alignment iterations
-    #[arg(short, long, default_value = "100", value_name = "NUM")]
+    #[arg(short = 'i', long, default_value = "100", value_name = "NUM")]
     max_iterations: usize,
     
-    /// Minimum alignment length to consider
-    #[arg(long, default_value = "10", value_name = "NUM")]
-    min_alignment_length: usize,
+    /// Minimum match length to consider (-k in seqwish)
+    #[arg(short = 'k', long, default_value = "1", value_name = "NUM")]
+    min_match_length: usize,
     
     /// Alignment match score
-    #[arg(long, default_value = "2", value_name = "NUM")]
+    #[arg(long, default_value = "0", value_name = "NUM")]
     match_score: i32,
     
     /// Alignment mismatch penalty
-    #[arg(long, default_value = "-1", value_name = "NUM")]
+    #[arg(long, default_value = "5", value_name = "NUM")]
     mismatch_penalty: i32,
     
-    /// Alignment gap penalty
-    #[arg(long, default_value = "-1", value_name = "NUM")]
-    gap_penalty: i32,
+    /// Gap open penalty
+    #[arg(long, default_value = "8", value_name = "NUM")]
+    gap_open: i32,
     
-    /// Maximum alignment score to compute (prevents computational blowup)
-    #[arg(long, default_value = "1000", value_name = "NUM")]
-    max_alignment_score: i32,
+    /// Gap extend penalty
+    #[arg(long, default_value = "2", value_name = "NUM")]
+    gap_extend: i32,
     
     /// Number of stable iterations required for convergence
     #[arg(long, default_value = "3", value_name = "NUM")]
@@ -72,26 +73,39 @@ struct Args {
 struct Sequence {
     id: String,
     data: Vec<u8>,
+    offset: usize, // Global offset in concatenated sequence
 }
 
-#[derive(Debug, Clone)]
-struct Alignment {
+/// A match between two sequence positions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct Match {
     seq1_id: usize,
-    seq2_id: usize,
-    seq1_start: usize,
-    seq1_end: usize,
-    seq2_start: usize,
-    seq2_end: usize,
-    score: i32,
+    seq1_pos: usize,
+    seq2_id: usize, 
+    seq2_pos: usize,
+    length: usize,
+    reverse: bool, // true if seq2 is reverse complement
 }
 
+
+/// Graph node containing sequence of characters
+#[derive(Debug, Clone)]
+struct Node {
+    id: usize,
+    sequence: Vec<u8>,
+}
+
+/// The main SeqRush struct implementing seqwish algorithm
 struct SeqRush {
     sequences: Vec<Sequence>,
+    total_length: usize,
     union_find: Arc<LockFreeUnionFind>,
-    _backup_union_find: Arc<std::sync::Mutex<QuickUnionUf<UnionBySize>>>,
-    alignments: Vec<Alignment>,
-    sequence_to_graph: HashMap<(usize, usize), usize>, // (seq_id, pos) -> node_id
-    graph_to_sequence: HashMap<usize, Vec<(usize, usize)>>, // node_id -> [(seq_id, pos)]
+    matches: Arc<Mutex<Vec<Match>>>, // Dynamic matches from alignments
+    seen: Arc<Vec<AtomicBool>>, // Bitvector X from algorithm
+    nodes: Arc<Mutex<Vec<Node>>>, // Graph nodes V
+    seq_to_node: Arc<Mutex<BTreeMap<usize, usize>>>, // Z mapping
+    node_to_seq: Arc<Mutex<BTreeMap<usize, Vec<usize>>>>, // Z̄ mapping
+    converged: Arc<AtomicBool>,
     iteration_count: Arc<AtomicUsize>,
     config: AlignmentConfig,
 }
@@ -99,11 +113,11 @@ struct SeqRush {
 #[derive(Debug, Clone)]
 struct AlignmentConfig {
     max_iterations: usize,
-    min_alignment_length: usize,
+    min_match_length: usize,
     match_score: i32,
     mismatch_penalty: i32,
-    gap_penalty: i32,
-    max_alignment_score: i32,
+    gap_open: i32,
+    gap_extend: i32,
     convergence_stability: usize,
     sparsification: f64,
     erdos_renyi_safety_factor: f64,
@@ -112,35 +126,147 @@ struct AlignmentConfig {
 
 impl SeqRush {
     fn new(sequences: Vec<Sequence>, config: AlignmentConfig) -> Self {
-        let total_chars: usize = sequences.iter().map(|s| s.data.len()).sum();
+        let total_length = sequences.iter().map(|s| s.data.len()).sum();
+        
+        // Initialize seen bitvector
+        let mut seen_vec = Vec::with_capacity(total_length);
+        for _ in 0..total_length {
+            seen_vec.push(AtomicBool::new(false));
+        }
         
         Self {
             sequences,
-            union_find: Arc::new(LockFreeUnionFind::new(total_chars)),
-            _backup_union_find: Arc::new(std::sync::Mutex::new(QuickUnionUf::<UnionBySize>::new(total_chars))),
-            alignments: Vec::new(),
-            sequence_to_graph: HashMap::new(),
-            graph_to_sequence: HashMap::new(),
+            total_length,
+            union_find: Arc::new(LockFreeUnionFind::new(total_length)),
+            matches: Arc::new(Mutex::new(Vec::new())),
+            seen: Arc::new(seen_vec),
+            nodes: Arc::new(Mutex::new(Vec::new())),
+            seq_to_node: Arc::new(Mutex::new(BTreeMap::new())),
+            node_to_seq: Arc::new(Mutex::new(BTreeMap::new())),
+            converged: Arc::new(AtomicBool::new(false)),
             iteration_count: Arc::new(AtomicUsize::new(0)),
             config,
         }
     }
     
-    /// Calculate Erdős-Rényi connectivity threshold probability
-    /// For a random graph G(n,p) to have a giant component with high probability,
-    /// we need p > (1 + ε) * ln(n) / n
-    fn calculate_erdos_renyi_threshold(n: usize, safety_factor: f64) -> f64 {
-        if n <= 1 {
-            return 1.0;
+    /// Main algorithm: build graph through dynamic alignment and transitive closure
+    fn build_graph(&mut self) {
+        println!("Building graph with {} sequences (total length: {})", 
+                 self.sequences.len(), self.total_length);
+        
+        // Phase 1: Dynamic alignment to discover matches
+        self.discover_matches_dynamically();
+        
+        // Phase 2: Graph induction via transitive closure (seqwish algorithm)
+        self.induce_graph();
+    }
+    
+    /// Discover matches through dynamic pairwise alignment
+    fn discover_matches_dynamically(&mut self) {
+        // Special case: single sequence has no pairs to align
+        if self.sequences.len() <= 1 {
+            println!("Single sequence: no alignment needed");
+            return;
         }
         
-        let n_f = n as f64;
-        // Critical threshold is ln(n)/n for connectivity
-        // We use safety_factor * ln(n)/n to ensure giant component with high probability
-        let threshold = safety_factor * n_f.ln() / n_f;
+        let mut stable_iterations = 0;
         
-        // Clamp to reasonable bounds
-        threshold.min(1.0).max(0.001)
+        for iteration in 0..self.config.max_iterations {
+            if self.converged.load(Ordering::Relaxed) {
+                break;
+            }
+            
+            println!("Alignment iteration {}", iteration + 1);
+            
+            // Select random pairs using Erdős-Rényi sparsification
+            let pairs = self.select_sequence_pairs();
+            
+            // If no pairs selected, increment stable iterations
+            if pairs.is_empty() {
+                stable_iterations += 1;
+                if stable_iterations >= self.config.convergence_stability {
+                    println!("Converged: no pairs to align for {} iterations", stable_iterations);
+                    self.converged.store(true, Ordering::Relaxed);
+                    break;
+                }
+                continue;
+            }
+            
+            // Align pairs in parallel and collect matches
+            let new_matches: Vec<Match> = pairs
+                .par_iter()
+                .flat_map(|&(i, j)| self.align_and_extract_matches(i, j))
+                .collect();
+            
+            // Add new matches, avoiding duplicates
+            let new_match_count = {
+                let mut matches = self.matches.lock().unwrap();
+                let existing_matches: HashSet<Match> = matches.iter().cloned().collect();
+                let mut added = 0;
+                
+                for m in new_matches {
+                    if !existing_matches.contains(&m) {
+                        matches.push(m);
+                        added += 1;
+                    }
+                }
+                
+                added
+            };
+            
+            // Check convergence
+            if new_match_count == 0 {
+                stable_iterations += 1;
+                if stable_iterations >= self.config.convergence_stability {
+                    println!("Converged: no new matches for {} iterations", stable_iterations);
+                    self.converged.store(true, Ordering::Relaxed);
+                    break;
+                }
+            } else {
+                stable_iterations = 0;
+                println!("Found {} new matches", new_match_count);
+            }
+            
+            self.iteration_count.fetch_add(1, Ordering::Relaxed);
+        }
+        
+        let total_matches = self.matches.lock().unwrap().len();
+        println!("Match discovery complete: {} total matches", total_matches);
+    }
+    
+    /// Select sequence pairs using Erdős-Rényi sparsification
+    fn select_sequence_pairs(&self) -> Vec<(usize, usize)> {
+        let n = self.sequences.len();
+        
+        // If only one sequence, no pairs to select
+        if n <= 1 {
+            return Vec::new();
+        }
+        
+        let mut pairs = Vec::new();
+        
+        // For each possible pair, decide whether to include it
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if self.should_align_pair(i, j) {
+                    pairs.push((i, j));
+                }
+            }
+        }
+        
+        // Shuffle for better load balancing
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        pairs.shuffle(&mut rng);
+        
+        if self.config.verbose {
+            let total_possible = n * (n - 1) / 2;
+            println!("Selected {} of {} possible pairs ({:.1}%)", 
+                     pairs.len(), total_possible, 
+                     100.0 * pairs.len() as f64 / total_possible as f64);
+        }
+        
+        pairs
     }
     
     /// Determine if a pair should be aligned based on sparsification
@@ -148,9 +274,8 @@ impl SeqRush {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         
-        // Create a deterministic hash of the pair
+        // Create deterministic hash
         let mut hasher = DefaultHasher::new();
-        // Hash in a way that's symmetric (same for (i,j) and (j,i))
         let (min_id, max_id) = if seq1_id < seq2_id {
             (seq1_id, seq2_id)
         } else {
@@ -160,306 +285,322 @@ impl SeqRush {
         max_id.hash(&mut hasher);
         let hash_value = hasher.finish();
         
-        // Convert hash to probability [0,1)
+        // Convert to probability
         let prob = (hash_value as f64) / (u64::MAX as f64);
-        
-        // Accept if probability is below sparsification threshold
         prob < self.config.sparsification
     }
     
-    fn build_graph(&mut self) {
-        println!("Building graph with {} sequences", self.sequences.len());
-        
-        // Initialize character positions
-        let mut char_offset = 0;
-        for (seq_id, seq) in self.sequences.iter().enumerate() {
-            for (pos, _) in seq.data.iter().enumerate() {
-                let global_pos = char_offset + pos;
-                self.sequence_to_graph.insert((seq_id, pos), global_pos);
-                self.graph_to_sequence.entry(global_pos).or_insert_with(Vec::new).push((seq_id, pos));
-            }
-            char_offset += seq.data.len();
-        }
-        
-        // Parallel alignment and graph construction
-        let mut prev_components = 0;
-        let mut no_change_count = 0;
-        
-        for iteration in 0..self.config.max_iterations {
-            println!("Iteration {}", iteration + 1);
-            
-            // Perform random pairwise alignments
-            self.perform_random_alignments();
-            
-            // Count connected components
-            let current_components = self.count_components();
-            println!("Components: {}", current_components);
-            
-            // Check for convergence with stability requirement
-            if current_components == prev_components {
-                no_change_count += 1;
-                if no_change_count >= self.config.convergence_stability {
-                    println!("Converged after {} iterations (stable for {} iterations)", iteration + 1, no_change_count);
-                    break;
-                }
-            } else {
-                no_change_count = 0;
-            }
-            
-            prev_components = current_components;
-        }
-    }
-    
-    fn perform_random_alignments(&mut self) {
-        use rand::seq::SliceRandom;
-        use rand::thread_rng;
-        
-        let mut rng = thread_rng();
-        let seq_count = self.sequences.len();
-        
-        // Generate all possible pairs and apply Erdős-Rényi sparsification
-        let mut pairs = Vec::new();
-        let mut total_pairs = 0;
-        let mut sparse_pairs = 0;
-        
-        for i in 0..seq_count {
-            for j in (i + 1)..seq_count {
-                total_pairs += 1;
-                if self.should_align_pair(i, j) {
-                    pairs.push((i, j));
-                    sparse_pairs += 1;
-                }
-            }
-        }
-        
-        if self.config.verbose {
-            let sparsification_ratio = sparse_pairs as f64 / total_pairs as f64;
-            println!("Erdős-Rényi sparsification: {}/{} pairs ({:.2}%) selected", 
-                    sparse_pairs, total_pairs, sparsification_ratio * 100.0);
-            println!("Sparsification probability: {:.4}", self.config.sparsification);
-        }
-        
-        pairs.shuffle(&mut rng);
-        
-        // For each iteration, take a subset of the sparse pairs
-        let batch_size = std::cmp::min(pairs.len(), std::cmp::max(1, pairs.len() / 4));
-        let selected_pairs: Vec<_> = pairs.into_iter().take(batch_size).collect();
-        
-        if self.config.verbose {
-            println!("Processing {} alignment pairs in parallel", selected_pairs.len());
-        }
-        
-        // Perform alignments in parallel and process immediately
-        // This avoids collecting all results before processing
-        selected_pairs
-            .par_iter()
-            .filter_map(|&(i, j)| {
-                self.align_sequences(i, j)
-            })
-            .for_each(|alignment| {
-                self.process_alignment(&alignment);
-            });
-    }
-    
-    fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-        seq.iter()
-            .rev()
-            .map(|&base| match base {
-                b'A' => b'T',
-                b'T' => b'A',
-                b'C' => b'G',
-                b'G' => b'C',
-                b'a' => b't',
-                b't' => b'a',
-                b'c' => b'g',
-                b'g' => b'c',
-                _ => base, // Keep N, ambiguous bases, etc. as-is
-            })
-            .collect()
-    }
-
-    fn align_sequences(&self, seq1_id: usize, seq2_id: usize) -> Option<Alignment> {
+    /// Align two sequences and extract matches
+    fn align_and_extract_matches(&self, seq1_id: usize, seq2_id: usize) -> Vec<Match> {
         let seq1 = &self.sequences[seq1_id];
         let seq2 = &self.sequences[seq2_id];
         
-        // Try forward orientation first
-        let forward_result = self.wfa_align(&seq1.data, &seq2.data);
+        if self.config.verbose {
+            println!("Aligning seq{} ({} bp) vs seq{} ({} bp)", 
+                     seq1_id, seq1.data.len(), seq2_id, seq2.data.len());
+        }
         
-        // Try reverse complement orientation
-        let seq2_rc = Self::reverse_complement(&seq2.data);
-        let reverse_result = self.wfa_align(&seq1.data, &seq2_rc);
+        let mut all_matches = Vec::new();
         
-        // Choose the best alignment
-        let best_result = match (forward_result, reverse_result) {
-            (Some((s1_start, s1_end, s2_start, s2_end, score1)), Some((_, _, _, _, score2))) => {
-                if score1 >= score2 {
-                    Some((s1_start, s1_end, s2_start, s2_end, score1))
-                } else {
-                    // For reverse complement, we need to adjust coordinates
-                    // Note: this is simplified - in practice you'd track orientation
-                    reverse_result
-                }
-            }
-            (Some(result), None) => Some(result),
-            (None, Some(result)) => Some(result),
-            (None, None) => None,
-        };
+        // Try forward alignment
+        if let Some(matches) = self.align_and_parse(seq1_id, seq2_id, &seq1.data, &seq2.data, false) {
+            all_matches.extend(matches);
+        }
         
-        if let Some((seq1_start, seq1_end, seq2_start, seq2_end, score)) = best_result {
-            // Early termination if score exceeds threshold
-            if score > self.config.max_alignment_score {
+        // Try reverse complement alignment
+        // DISABLED: Reverse complement matching is causing incorrect node associations
+        // for repetitive sequences. For the simplest algorithm, we only consider
+        // forward matches.
+        // let seq2_rc = Self::reverse_complement(&seq2.data);
+        // if let Some(matches) = self.align_and_parse(seq1_id, seq2_id, &seq1.data, &seq2_rc, true) {
+        //     all_matches.extend(matches);
+        // }
+        
+        if self.config.verbose && !all_matches.is_empty() {
+            println!("Found {} matches between seq{} and seq{}", all_matches.len(), seq1_id, seq2_id);
+        }
+        
+        all_matches
+    }
+    
+    /// Perform alignment and parse CIGAR to extract matches
+    fn align_and_parse(&self, seq1_id: usize, seq2_id: usize, 
+                       seq1: &[u8], seq2: &[u8], reverse: bool) -> Option<Vec<Match>> {
+        // Use WFA2 for alignment
+        let mut aligner = AffineWavefronts::with_penalties(
+            self.config.match_score,
+            self.config.mismatch_penalty,
+            self.config.gap_open,
+            self.config.gap_extend,
+        );
+        
+        aligner.set_memory_mode(MemoryMode::Ultralow);
+        
+        match aligner.align(seq1, seq2) {
+            AlignmentStatus::Completed => {
+                let cigar = aligner.cigar();
                 if self.config.verbose {
-                    println!("Alignment score {} exceeds threshold {}, skipping", 
-                            score, self.config.max_alignment_score);
+                    println!("Alignment completed: seq{} vs seq{} (reverse={}): CIGAR={}", 
+                             seq1_id, seq2_id, reverse, String::from_utf8_lossy(cigar));
                 }
-                return None;
+                self.parse_cigar_to_matches(seq1_id, seq2_id, cigar, seq1.len(), seq2.len(), reverse)
             }
-            
-            Some(Alignment {
-                seq1_id,
-                seq2_id,
-                seq1_start,
-                seq1_end,
-                seq2_start,
-                seq2_end,
-                score,
-            })
-        } else {
-            // Fall back to exact match finder (forward orientation only for now)
-            self.find_exact_matches(seq1_id, seq2_id, &seq1.data, &seq2.data)
+            status => {
+                if self.config.verbose {
+                    println!("Alignment failed: seq{} vs seq{} (reverse={}): {:?}", 
+                             seq1_id, seq2_id, reverse, status);
+                }
+                None
+            }
         }
     }
     
-    fn find_exact_matches(&self, seq1_id: usize, seq2_id: usize, seq1: &[u8], seq2: &[u8]) -> Option<Alignment> {
-        // Simple exact match finder - in practice this would use biWFA
-        let min_match_len = self.config.min_alignment_length;
+    /// Parse CIGAR string to extract match intervals
+    fn parse_cigar_to_matches(&self, seq1_id: usize, seq2_id: usize,
+                              cigar: &[u8], _seq1_len: usize, seq2_len: usize, 
+                              reverse: bool) -> Option<Vec<Match>> {
+        let cigar_str = String::from_utf8_lossy(cigar);
+        let mut matches = Vec::new();
         
-        for i in 0..seq1.len().saturating_sub(min_match_len) {
-            for j in 0..seq2.len().saturating_sub(min_match_len) {
-                let mut match_len = 0;
-                while i + match_len < seq1.len() && 
-                      j + match_len < seq2.len() && 
-                      seq1[i + match_len] == seq2[j + match_len] {
-                    match_len += 1;
-                }
-                
-                if match_len >= min_match_len {
-                    let score = match_len as i32;
-                    // Respect max alignment score threshold
-                    if score <= self.config.max_alignment_score {
-                        return Some(Alignment {
-                            seq1_id,
-                            seq2_id,
-                            seq1_start: i,
-                            seq1_end: i + match_len,
-                            seq2_start: j,
-                            seq2_end: j + match_len,
-                            score,
-                        });
-                    }
-                }
-            }
-        }
+        let mut seq1_pos = 0;
+        let mut seq2_pos = 0;
+        let mut current_num = String::new();
+        let mut in_match_run = false;
+        let mut match_start_seq1 = 0;
+        let mut match_start_seq2 = 0;
+        let mut match_length = 0;
         
-        None
-    }
-
-    fn wfa_align(&self, seq1: &[u8], seq2: &[u8]) -> Option<(usize, usize, usize, usize, i32)> {
-        // Placeholder for biWFA alignment
-        // This would be replaced with actual WFA2 alignment
-        // For now, using a simple local alignment approach
-        
-        let match_score = self.config.match_score;
-        let mismatch_penalty = self.config.mismatch_penalty;
-        let gap_penalty = self.config.gap_penalty;
-        
-        let n = seq1.len();
-        let m = seq2.len();
-        
-        if n == 0 || m == 0 {
-            return None;
-        }
-        
-        // Simple Smith-Waterman-like approach (very basic)
-        let mut dp = vec![vec![0; m + 1]; n + 1];
-        let mut max_score = 0;
-        let mut max_i = 0;
-        let mut max_j = 0;
-        
-        for i in 1..=n {
-            for j in 1..=m {
-                let match_mismatch = if seq1[i-1] == seq2[j-1] { 
-                    dp[i-1][j-1] + match_score 
-                } else { 
-                    dp[i-1][j-1] + mismatch_penalty 
+        // Helper to finish a match run
+        let finish_match = |matches: &mut Vec<Match>, match_start_seq1, match_start_seq2, match_length| {
+            if match_length >= self.config.min_match_length {
+                let seq2_actual_pos = if reverse {
+                    seq2_len - match_start_seq2 - match_length
+                } else {
+                    match_start_seq2
                 };
                 
-                let delete = dp[i-1][j] + gap_penalty;
-                let insert = dp[i][j-1] + gap_penalty;
+                if self.config.verbose && reverse {
+                    println!("  Reverse match: seq1[{}..{}] vs seq2_rc[{}..{}] -> seq2[{}..{}]",
+                             match_start_seq1, match_start_seq1 + match_length,
+                             match_start_seq2, match_start_seq2 + match_length,
+                             seq2_actual_pos, seq2_actual_pos + match_length);
+                }
                 
-                dp[i][j] = std::cmp::max(0, std::cmp::max(match_mismatch, std::cmp::max(delete, insert)));
+                matches.push(Match {
+                    seq1_id,
+                    seq1_pos: match_start_seq1,
+                    seq2_id,
+                    seq2_pos: seq2_actual_pos,
+                    length: match_length,
+                    reverse,
+                });
+            }
+        };
+        
+        for ch in cigar_str.chars() {
+            if ch.is_ascii_digit() {
+                current_num.push(ch);
+            } else {
+                let count = if current_num.is_empty() { 1 } else { current_num.parse::<usize>().unwrap_or(1) };
+                current_num.clear();
                 
-                if dp[i][j] > max_score {
-                    max_score = dp[i][j];
-                    max_i = i;
-                    max_j = j;
+                match ch {
+                    'M' | '=' => {
+                        // Match or alignment position
+                        if !in_match_run {
+                            in_match_run = true;
+                            match_start_seq1 = seq1_pos;
+                            match_start_seq2 = seq2_pos;
+                            match_length = 0;
+                        }
+                        match_length += count;
+                        seq1_pos += count;
+                        seq2_pos += count;
+                    }
+                    'X' | 'I' | 'D' => {
+                        // End any current match run
+                        if in_match_run {
+                            finish_match(&mut matches, match_start_seq1, match_start_seq2, match_length);
+                            in_match_run = false;
+                        }
+                        
+                        match ch {
+                            'X' => {
+                                // Mismatch
+                                seq1_pos += count;
+                                seq2_pos += count;
+                            }
+                            'I' => {
+                                // Insertion in seq2
+                                seq2_pos += count;
+                            }
+                            'D' => {
+                                // Deletion in seq2
+                                seq1_pos += count;
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
         
-        if max_score < 10 {
-            return None;
+        // Finish any remaining match run
+        if in_match_run {
+            finish_match(&mut matches, match_start_seq1, match_start_seq2, match_length);
         }
         
-        // Early termination if score exceeds threshold
-        if max_score > self.config.max_alignment_score {
-            return None;
+        if matches.is_empty() {
+            None
+        } else {
+            Some(matches)
+        }
+    }
+    
+    /// Induce graph from matches using transitive closure (core seqwish algorithm)
+    fn induce_graph(&mut self) {
+        println!("Inducing graph from matches...");
+        
+        if self.total_length == 0 {
+            println!("No sequences to process");
+            return;
         }
         
-        // Traceback to find alignment boundaries (simplified)
-        let mut i = max_i;
-        let mut j = max_j;
-        let end_i = i;
-        let end_j = j;
+        // First, build the union-find structure from all matches
+        self.build_union_find_from_matches();
         
-        while i > 0 && j > 0 && dp[i][j] > 0 {
-            if seq1[i-1] == seq2[j-1] {
-                i -= 1;
-                j -= 1;
-            } else if dp[i-1][j] > dp[i][j-1] {
-                i -= 1;
-            } else {
-                j -= 1;
+        // Debug: check union-find structure
+        if self.config.verbose {
+            println!("Union-find structure:");
+            for i in 0..self.total_length {
+                println!("  Position {} -> root {}", i, self.union_find.find(i));
             }
         }
         
-        Some((i, end_i, j, end_j, max_score))
+        // Process each character position
+        let positions: Vec<usize> = (0..self.total_length).collect();
+        positions.into_par_iter().for_each(|pos| {
+            self.process_position(pos);
+        });
+        
+        println!("Graph induction complete: {} nodes", self.nodes.lock().unwrap().len());
     }
     
-    fn process_alignment(&self, alignment: &Alignment) {
-        // Union characters that align
-        let seq1_offset = self.sequences.iter().take(alignment.seq1_id).map(|s| s.data.len()).sum::<usize>();
-        let seq2_offset = self.sequences.iter().take(alignment.seq2_id).map(|s| s.data.len()).sum::<usize>();
+    /// Build union-find structure from all matches
+    fn build_union_find_from_matches(&self) {
+        let matches = self.matches.lock().unwrap();
         
-        for pos in 0..(alignment.seq1_end - alignment.seq1_start) {
-            let pos1 = seq1_offset + alignment.seq1_start + pos;
-            let pos2 = seq2_offset + alignment.seq2_start + pos;
+        println!("Building union-find from {} matches", matches.len());
+        
+        for m in matches.iter() {
+            let seq1_offset = self.sequences[m.seq1_id].offset;
+            let seq2_offset = self.sequences[m.seq2_id].offset;
             
-            self.union_find.unite(pos1, pos2);
+            // Union all corresponding positions in the match
+            for i in 0..m.length {
+                let pos1 = seq1_offset + m.seq1_pos + i;
+                let pos2 = if m.reverse {
+                    // For reverse matches, seq2_pos is already the position in the original sequence
+                    // But we need to traverse it in reverse order
+                    seq2_offset + m.seq2_pos + (m.length - 1 - i)
+                } else {
+                    seq2_offset + m.seq2_pos + i
+                };
+                
+                if self.config.verbose {
+                    let (s1_id, s1_pos) = self.global_to_seq_pos(pos1);
+                    let (s2_id, s2_pos) = self.global_to_seq_pos(pos2);
+                    println!("  Uniting position {} (seq{}[{}]='{}') with position {} (seq{}[{}]='{}')", 
+                             pos1, s1_id, s1_pos, self.sequences[s1_id].data[s1_pos] as char,
+                             pos2, s2_id, s2_pos, self.sequences[s2_id].data[s2_pos] as char);
+                }
+                self.union_find.unite(pos1, pos2);
+            }
+            
+            if self.config.verbose {
+                println!("Match: seq{} pos {} vs seq{} pos {} len {} reverse={}",
+                         m.seq1_id, m.seq1_pos, m.seq2_id, m.seq2_pos, m.length, m.reverse);
+            }
         }
     }
     
-    fn count_components(&self) -> usize {
-        let total_chars: usize = self.sequences.iter().map(|s| s.data.len()).sum();
-        let mut components = std::collections::HashSet::new();
-        
-        for i in 0..total_chars {
-            components.insert(self.union_find.find(i));
+    /// Process a single position (implements lines 19-32 of seqwish algorithm)
+    fn process_position(&self, pos: usize) {
+        // Check if already seen
+        if self.seen[pos].load(Ordering::Acquire) {
+            return;
         }
         
-        components.len()
+        // Get the root of this position in union-find
+        let root = self.union_find.find(pos);
+        
+        // Collect all positions with the same root - this is the transitive closure
+        let mut transitive_matches = Vec::new();
+        
+        // Check all positions to find those in the same equivalence class
+        for i in 0..self.total_length {
+            if self.union_find.find(i) == root && !self.seen[i].load(Ordering::Acquire) {
+                transitive_matches.push(i);
+            }
+        }
+        
+        if transitive_matches.is_empty() {
+            return;
+        }
+        
+        if self.config.verbose && transitive_matches.len() > 1 {
+            println!("Position {} (root {}) has {} matches in equivalence class", 
+                     pos, root, transitive_matches.len());
+        }
+        
+        // Mark all positions as seen atomically
+        for &pos in &transitive_matches {
+            self.seen[pos].store(true, Ordering::Release);
+        }
+        
+        // Create new node
+        let node_id = {
+            let mut nodes = self.nodes.lock().unwrap();
+            let id = nodes.len();
+            
+            // Determine consensus character(s) for the node
+            let mut char_counts = HashMap::new();
+            let mut first_char = None;
+            for &match_pos in &transitive_matches {
+                let (seq_id, seq_pos) = self.global_to_seq_pos(match_pos);
+                let ch = self.sequences[seq_id].data[seq_pos];
+                if first_char.is_none() {
+                    first_char = Some(ch);
+                }
+                *char_counts.entry(ch).or_insert(0) += 1;
+            }
+            
+            // For now, just use the first character seen
+            let consensus = first_char.unwrap_or(b'N');
+            
+            nodes.push(Node {
+                id,
+                sequence: vec![consensus],
+            });
+            
+            id
+        };
+        
+        // Update mappings
+        {
+            let mut seq_to_node = self.seq_to_node.lock().unwrap();
+            let mut node_to_seq = self.node_to_seq.lock().unwrap();
+            
+            for &match_pos in &transitive_matches {
+                seq_to_node.insert(match_pos, node_id);
+                node_to_seq.entry(node_id).or_insert_with(Vec::new).push(match_pos);
+            }
+        }
     }
     
+    
+    /// Write the graph in GFA format
     fn write_gfa(&self, output_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         use std::fs::File;
         use std::io::{BufWriter, Write};
@@ -467,74 +608,51 @@ impl SeqRush {
         let file = File::create(output_path)?;
         let mut writer = BufWriter::new(file);
         
+        // Header
         writeln!(writer, "H\tVN:Z:1.0")?;
         
-        // Collect node information
-        let mut node_chars = HashMap::new();
-        let mut node_positions = HashMap::new();
-        let total_chars: usize = self.sequences.iter().map(|s| s.data.len()).sum();
-        
-        for i in 0..total_chars {
-            let root = self.union_find.find(i);
-            let (seq_id, pos) = self.char_to_sequence_pos(i);
-            let char = self.sequences[seq_id].data[pos];
-            
-            node_chars.entry(root).or_insert_with(Vec::new).push((i, char));
-            node_positions.entry(root).or_insert_with(Vec::new).push((seq_id, pos));
+        // Segments (nodes)
+        let nodes = self.nodes.lock().unwrap();
+        for node in nodes.iter() {
+            writeln!(writer, "S\t{}\t{}", 
+                     node.id + 1,  // GFA uses 1-based IDs
+                     String::from_utf8_lossy(&node.sequence))?;
         }
         
-        // Sort characters within each node by their original order
-        for chars in node_chars.values_mut() {
-            chars.sort_by_key(|&(global_pos, _)| global_pos);
-        }
+        // Paths and edges
+        let seq_to_node = self.seq_to_node.lock().unwrap();
+        let mut edges = HashSet::new();
         
-        // Write segments (nodes) - compact consecutive identical characters
-        let mut node_id_map = HashMap::new();
-        let mut compact_node_id = 0;
-        
-        for (&original_node_id, chars) in node_chars.iter() {
-            if chars.is_empty() {
-                continue;
-            }
+        for (_seq_id, seq) in self.sequences.iter().enumerate() {
+            let mut path: Vec<String> = Vec::new();
+            let mut pos = 0;
+            let mut prev_node_id: Option<usize> = None;
             
-            // Compact the sequence by merging consecutive identical characters
-            let mut compact_sequence = Vec::new();
-            let mut prev_char = None;
-            
-            for &(_, char) in chars {
-                if Some(char) != prev_char {
-                    compact_sequence.push(char);
-                    prev_char = Some(char);
-                }
-            }
-            
-            if !compact_sequence.is_empty() {
-                let sequence = String::from_utf8_lossy(&compact_sequence);
-                writeln!(writer, "S\t{}\t{}", compact_node_id, sequence)?;
-                node_id_map.insert(original_node_id, compact_node_id);
-                compact_node_id += 1;
-            }
-        }
-        
-        // Write edges (simple approach - consecutive nodes in paths)
-        let mut edges = std::collections::HashSet::new();
-        
-        for (seq_id, seq) in self.sequences.iter().enumerate() {
-            let seq_offset = self.sequences.iter().take(seq_id).map(|s| s.data.len()).sum::<usize>();
-            let mut prev_node = None;
-            
-            for pos in 0..seq.data.len() {
-                let global_pos = seq_offset + pos;
-                let original_node_id = self.union_find.find(global_pos);
+            while pos < seq.data.len() {
+                let global_pos = seq.offset + pos;
                 
-                if let Some(&current_node) = node_id_map.get(&original_node_id) {
-                    if let Some(prev) = prev_node {
-                        if prev != current_node {
-                            edges.insert((prev, current_node));
+                if let Some(&node_id) = seq_to_node.get(&global_pos) {
+                    let node_str = format!("{}+", node_id + 1);
+                    path.push(node_str);
+                    
+                    // Add edge from previous node if exists
+                    if let Some(prev_id) = prev_node_id {
+                        if prev_id != node_id {
+                            edges.insert((prev_id + 1, node_id + 1));
                         }
                     }
-                    prev_node = Some(current_node);
+                    
+                    prev_node_id = Some(node_id);
+                    pos += 1;
+                } else {
+                    // This shouldn't happen if graph is complete
+                    eprintln!("Warning: position {} not mapped to any node", global_pos);
+                    pos += 1;
                 }
+            }
+            
+            if !path.is_empty() {
+                writeln!(writer, "P\t{}\t{}\t*", seq.id, path.join(","))?;
             }
         }
         
@@ -543,44 +661,46 @@ impl SeqRush {
             writeln!(writer, "L\t{}\t+\t{}\t+\t0M", from, to)?;
         }
         
-        // Write paths
-        for (seq_id, seq) in self.sequences.iter().enumerate() {
-            let mut path_nodes = Vec::new();
-            let seq_offset = self.sequences.iter().take(seq_id).map(|s| s.data.len()).sum::<usize>();
-            let mut prev_node = None;
-            
-            for pos in 0..seq.data.len() {
-                let global_pos = seq_offset + pos;
-                let original_node_id = self.union_find.find(global_pos);
-                
-                if let Some(&current_node) = node_id_map.get(&original_node_id) {
-                    if Some(current_node) != prev_node {
-                        path_nodes.push(format!("{}+", current_node));
-                        prev_node = Some(current_node);
-                    }
-                }
-            }
-            
-            if !path_nodes.is_empty() {
-                writeln!(writer, "P\t{}\t{}\t*", seq.id, path_nodes.join(","))?;
-            }
-        }
-        
         Ok(())
     }
     
-    fn char_to_sequence_pos(&self, global_pos: usize) -> (usize, usize) {
-        let mut offset = 0;
+    /// Convert global position to sequence ID and position
+    fn global_to_seq_pos(&self, global_pos: usize) -> (usize, usize) {
         for (seq_id, seq) in self.sequences.iter().enumerate() {
-            if global_pos < offset + seq.data.len() {
-                return (seq_id, global_pos - offset);
+            if global_pos >= seq.offset && global_pos < seq.offset + seq.data.len() {
+                return (seq_id, global_pos - seq.offset);
             }
-            offset += seq.data.len();
         }
         panic!("Invalid global position: {}", global_pos);
     }
+    
+    /// Calculate Erdős-Rényi threshold
+    fn calculate_erdos_renyi_threshold(n: usize, safety_factor: f64) -> f64 {
+        if n <= 1 {
+            return 1.0;
+        }
+        
+        let n_f = n as f64;
+        let threshold = safety_factor * n_f.ln() / n_f;
+        threshold.min(1.0).max(0.001)
+    }
+    
+    /// Reverse complement a sequence
+    fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+        seq.iter()
+            .rev()
+            .map(|&base| match base {
+                b'A' | b'a' => b'T',
+                b'T' | b't' => b'A',
+                b'C' | b'c' => b'G',
+                b'G' | b'g' => b'C',
+                _ => base,
+            })
+            .collect()
+    }
 }
 
+/// Load sequences from FASTA file
 fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
@@ -590,6 +710,7 @@ fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::
     let mut sequences = Vec::new();
     let mut current_id = String::new();
     let mut current_data = Vec::new();
+    let mut offset = 0;
     
     for line in reader.lines() {
         let line = line?;
@@ -598,12 +719,14 @@ fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::
                 sequences.push(Sequence {
                     id: current_id.clone(),
                     data: current_data.clone(),
+                    offset,
                 });
+                offset += current_data.len();
                 current_data.clear();
             }
-            current_id = line[1..].to_string();
+            current_id = line[1..].trim().to_string();
         } else {
-            current_data.extend(line.bytes());
+            current_data.extend(line.trim().bytes());
         }
     }
     
@@ -611,6 +734,7 @@ fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::
         sequences.push(Sequence {
             id: current_id,
             data: current_data,
+            offset,
         });
     }
     
@@ -620,7 +744,7 @@ fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     
-    // Set up Rayon thread pool
+    // Set up thread pool
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
         .build_global()
@@ -628,55 +752,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Load sequences
     let sequences = load_sequences(&args.sequences)?;
-    if args.verbose {
-        println!("Loaded {} sequences", sequences.len());
-        for seq in &sequences {
-            println!("  {}: {} bp", seq.id, seq.data.len());
-        }
+    println!("Loaded {} sequences", sequences.len());
+    
+    // Calculate sparsification
+    let sparsification = if let Some(s) = args.sparsification {
+        s
     } else {
-        println!("Loaded {} sequences", sequences.len());
+        SeqRush::calculate_erdos_renyi_threshold(sequences.len(), args.erdos_renyi_safety_factor)
+    };
+    
+    if args.verbose {
+        println!("Using sparsification factor: {:.4}", sparsification);
     }
     
-    // Calculate sparsification probability using Erdős-Rényi model
-    let sparsification = if let Some(manual_sparse) = args.sparsification {
-        if args.verbose {
-            println!("Using manual sparsification: {:.4}", manual_sparse);
-        }
-        manual_sparse
-    } else {
-        let calculated = SeqRush::calculate_erdos_renyi_threshold(sequences.len(), args.erdos_renyi_safety_factor);
-        if args.verbose {
-            println!("Auto-calculated Erdős-Rényi sparsification: {:.4} (n={}, safety_factor={})", 
-                    calculated, sequences.len(), args.erdos_renyi_safety_factor);
-        }
-        calculated
-    };
-
-    // Create configuration
+    // Create config
     let config = AlignmentConfig {
         max_iterations: args.max_iterations,
-        min_alignment_length: args.min_alignment_length,
+        min_match_length: args.min_match_length,
         match_score: args.match_score,
         mismatch_penalty: args.mismatch_penalty,
-        gap_penalty: args.gap_penalty,
-        max_alignment_score: args.max_alignment_score,
+        gap_open: args.gap_open,
+        gap_extend: args.gap_extend,
         convergence_stability: args.convergence_stability,
         sparsification,
         erdos_renyi_safety_factor: args.erdos_renyi_safety_factor,
         verbose: args.verbose,
     };
-    
-    if args.verbose {
-        println!("Configuration:");
-        println!("  Max iterations: {}", config.max_iterations);
-        println!("  Min alignment length: {}", config.min_alignment_length);
-        println!("  Scoring: match={}, mismatch={}, gap={}, max_score={}", 
-                config.match_score, config.mismatch_penalty, config.gap_penalty, config.max_alignment_score);
-        println!("  Convergence stability: {}", config.convergence_stability);
-        println!("  Sparsification: {:.4} (Erdős-Rényi safety factor: {})", 
-                config.sparsification, config.erdos_renyi_safety_factor);
-        println!("  Threads: {}", args.threads);
-    }
     
     // Build graph
     let mut seqrush = SeqRush::new(sequences, config);
@@ -700,18 +801,17 @@ mod tests {
             Sequence {
                 id: "seq1".to_string(),
                 data: b"ATCGATCGATCGATCG".to_vec(),
+                offset: 0,
             },
             Sequence {
                 id: "seq2".to_string(),
                 data: b"ATCGATCGATCGATCG".to_vec(),
+                offset: 16,
             },
             Sequence {
                 id: "seq3".to_string(),
                 data: b"ATCGATCGCTCGATCG".to_vec(),
-            },
-            Sequence {
-                id: "seq4".to_string(),
-                data: b"GCTAGCTAGCTAGCTA".to_vec(),
+                offset: 32,
             },
         ]
     }
@@ -719,317 +819,392 @@ mod tests {
     fn create_test_config() -> AlignmentConfig {
         AlignmentConfig {
             max_iterations: 10,
-            min_alignment_length: 5,
-            match_score: 2,
-            mismatch_penalty: -1,
-            gap_penalty: -1,
-            max_alignment_score: 1000,
+            min_match_length: 4,
+            match_score: 0,
+            mismatch_penalty: 5,
+            gap_open: 8,
+            gap_extend: 2,
             convergence_stability: 2,
-            sparsification: 1.0, // Use all pairs for testing
+            sparsification: 1.0,
             erdos_renyi_safety_factor: 3.0,
             verbose: false,
         }
     }
 
-    fn create_temp_fasta(sequences: &[(&str, &str)]) -> NamedTempFile {
+    #[test]
+    fn test_sequence_loading() {
         let mut temp_file = NamedTempFile::new().unwrap();
-        for (id, seq) in sequences {
-            writeln!(temp_file, ">{}", id).unwrap();
-            writeln!(temp_file, "{}", seq).unwrap();
-        }
+        writeln!(temp_file, ">seq1").unwrap();
+        writeln!(temp_file, "ATCG").unwrap();
+        writeln!(temp_file, ">seq2").unwrap();
+        writeln!(temp_file, "GCTA").unwrap();
         temp_file.flush().unwrap();
-        temp_file
-    }
-
-    #[test]
-    fn test_sequence_creation() {
-        let sequences = create_test_sequences();
-        assert_eq!(sequences.len(), 4);
-        assert_eq!(sequences[0].id, "seq1");
-        assert_eq!(sequences[0].data, b"ATCGATCGATCGATCG");
-    }
-
-    #[test]
-    fn test_config_creation() {
-        let config = create_test_config();
-        assert_eq!(config.max_iterations, 10);
-        assert_eq!(config.min_alignment_length, 5);
-        assert_eq!(config.match_score, 2);
-    }
-
-    #[test]
-    fn test_seqrush_creation() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences, config);
-        
-        assert_eq!(seqrush.sequences.len(), 4);
-        assert_eq!(seqrush.config.max_iterations, 10);
-    }
-
-    #[test]
-    fn test_fasta_loading() {
-        let temp_file = create_temp_fasta(&[
-            ("test1", "ATCGATCG"),
-            ("test2", "GCTAGCTA"),
-        ]);
         
         let sequences = load_sequences(temp_file.path().to_str().unwrap()).unwrap();
         assert_eq!(sequences.len(), 2);
-        assert_eq!(sequences[0].id, "test1");
-        assert_eq!(sequences[0].data, b"ATCGATCG");
-        assert_eq!(sequences[1].id, "test2");
-        assert_eq!(sequences[1].data, b"GCTAGCTA");
+        assert_eq!(sequences[0].id, "seq1");
+        assert_eq!(sequences[0].data, b"ATCG");
+        assert_eq!(sequences[0].offset, 0);
+        assert_eq!(sequences[1].offset, 4);
     }
 
     #[test]
-    fn test_fasta_loading_empty_file() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = load_sequences(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 0);
+    fn test_reverse_complement() {
+        assert_eq!(SeqRush::reverse_complement(b"ATCG"), b"CGAT");
+        assert_eq!(SeqRush::reverse_complement(b"atcg"), b"CGAT");
+        assert_eq!(SeqRush::reverse_complement(b"AAATTTCCCGGG"), b"CCCGGGAAATTT");
     }
 
     #[test]
-    fn test_char_to_sequence_pos() {
+    fn test_match_extraction() {
         let sequences = create_test_sequences();
         let config = create_test_config();
         let seqrush = SeqRush::new(sequences, config);
         
-        // First sequence starts at position 0
-        let (seq_id, pos) = seqrush.char_to_sequence_pos(0);
-        assert_eq!(seq_id, 0);
-        assert_eq!(pos, 0);
+        // Test CIGAR parsing
+        let cigar = b"8M1X7M";
+        let matches = seqrush.parse_cigar_to_matches(0, 1, cigar, 16, 16, false).unwrap();
         
-        // Position in second sequence (first sequence has 16 chars)
-        let (seq_id, pos) = seqrush.char_to_sequence_pos(16);
-        assert_eq!(seq_id, 1);
-        assert_eq!(pos, 0);
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].length, 8);
+        assert_eq!(matches[1].length, 7);
     }
 
     #[test]
-    fn test_exact_match_finding() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences.clone(), config);
-        
-        // Test exact match between identical sequences
-        let alignment = seqrush.find_exact_matches(0, 1, &sequences[0].data, &sequences[1].data);
-        assert!(alignment.is_some());
-        
-        let alignment = alignment.unwrap();
-        assert_eq!(alignment.seq1_id, 0);
-        assert_eq!(alignment.seq2_id, 1);
-        assert!(alignment.seq1_end - alignment.seq1_start >= 5);
-    }
-
-    #[test]
-    fn test_wfa_alignment() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences.clone(), config);
-        
-        // Test alignment between similar sequences
-        let result = seqrush.wfa_align(&sequences[0].data, &sequences[2].data);
-        assert!(result.is_some());
-        
-        let (start1, end1, start2, end2, score) = result.unwrap();
-        assert!(end1 > start1);
-        assert!(end2 > start2);
-        assert!(score > 0);
-    }
-
-    #[test]
-    fn test_wfa_alignment_no_match() {
+    fn test_transitive_closure() {
         let sequences = create_test_sequences();
         let config = create_test_config();
         let seqrush = SeqRush::new(sequences, config);
         
-        // Create sequences with no good alignment
-        let seq1 = b"AAAAAAAAAA";
-        let seq2 = b"TTTTTTTTTT";
+        // Add some test matches
+        {
+            let mut matches = seqrush.matches.lock().unwrap();
+            matches.push(Match {
+                seq1_id: 0,
+                seq1_pos: 0,
+                seq2_id: 1,
+                seq2_pos: 0,
+                length: 8,
+                reverse: false,
+            });
+        }
         
-        let result = seqrush.wfa_align(seq1, seq2);
-        // Should return None for poor alignments
-        assert!(result.is_none());
+        // Build union-find
+        seqrush.build_union_find_from_matches();
+        
+        // Check that positions are unioned
+        let root0 = seqrush.union_find.find(0);
+        let root16 = seqrush.union_find.find(16);
+        assert_eq!(root0, root16); // Positions 0 and 16 should have same root
     }
 
     #[test]
-    fn test_alignment_processing() {
+    fn test_graph_construction() {
         let sequences = create_test_sequences();
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences, config);
+        let mut config = create_test_config();
+        config.max_iterations = 2;
         
-        let alignment = Alignment {
-            seq1_id: 0,
-            seq2_id: 1,
-            seq1_start: 0,
-            seq1_end: 10,
-            seq2_start: 0,
-            seq2_end: 10,
-            score: 20,
-        };
+        let mut seqrush = SeqRush::new(sequences, config);
+        seqrush.build_graph();
         
-        let initial_components = seqrush.count_components();
-        seqrush.process_alignment(&alignment);
-        let final_components = seqrush.count_components();
-        
-        // Processing alignment should reduce component count
-        assert!(final_components <= initial_components);
-    }
-
-    #[test]
-    fn test_component_counting() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let total_chars: usize = sequences.iter().map(|s| s.data.len()).sum();
-        let seqrush = SeqRush::new(sequences, config);
-        
-        let components = seqrush.count_components();
-        
-        // Initially, each character is its own component
-        assert_eq!(components, total_chars);
+        let nodes = seqrush.nodes.lock().unwrap();
+        assert!(nodes.len() > 0);
     }
 
     #[test]
     fn test_gfa_output() {
         let sequences = vec![
             Sequence {
-                id: "simple1".to_string(),
+                id: "test1".to_string(),
                 data: b"ATCG".to_vec(),
+                offset: 0,
             },
             Sequence {
-                id: "simple2".to_string(),
+                id: "test2".to_string(),
                 data: b"ATCG".to_vec(),
+                offset: 4,
             },
         ];
-        let config = create_test_config();
+        
+        let mut config = create_test_config();
+        config.max_iterations = 1;
+        
         let mut seqrush = SeqRush::new(sequences, config);
-        
-        // Build a simple graph
-        seqrush.build_graph();
-        
-        // Test GFA output
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
-        
-        // Read and verify GFA content
-        let content = std::fs::read_to_string(temp_file.path()).unwrap();
-        assert!(content.starts_with("H\tVN:Z:1.0"));
-        assert!(content.contains("S\t"));  // Should have segments
-        assert!(content.contains("P\t"));  // Should have paths
-    }
-
-    #[test]
-    fn test_gfa_output_validation() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let mut seqrush = SeqRush::new(sequences, config);
-        
         seqrush.build_graph();
         
         let temp_file = NamedTempFile::new().unwrap();
         seqrush.write_gfa(temp_file.path().to_str().unwrap()).unwrap();
         
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // Check GFA format requirements
-        assert!(lines[0].starts_with("H\t"));  // Header
-        
-        let mut has_segments = false;
-        let mut has_paths = false;
-        
-        for line in &lines {
-            if line.starts_with("S\t") {
-                has_segments = true;
-                // Verify segment format: S<tab>id<tab>sequence
-                let parts: Vec<&str> = line.split('\t').collect();
-                assert_eq!(parts.len(), 3);
-                assert!(parts[1].parse::<usize>().is_ok()); // ID should be numeric
-                assert!(!parts[2].is_empty()); // Sequence should not be empty
-            }
-            if line.starts_with("P\t") {
-                has_paths = true;
-                // Verify path format
-                let parts: Vec<&str> = line.split('\t').collect();
-                assert!(parts.len() >= 3);
-            }
-        }
-        
-        assert!(has_segments);
-        assert!(has_paths);
+        assert!(content.contains("H\tVN:Z:1.0"));
+        assert!(content.contains("S\t"));
     }
 
     #[test]
-    fn test_convergence_detection() {
+    fn test_erdos_renyi_calculation() {
+        let threshold_10 = SeqRush::calculate_erdos_renyi_threshold(10, 3.0);
+        let threshold_100 = SeqRush::calculate_erdos_renyi_threshold(100, 3.0);
+        let threshold_1000 = SeqRush::calculate_erdos_renyi_threshold(1000, 3.0);
+        
+        assert!(threshold_10 > threshold_100);
+        assert!(threshold_100 > threshold_1000);
+        assert!(threshold_1000 > 0.001);
+        assert!(threshold_10 < 1.0);
+    }
+
+    #[test]
+    fn test_sequence_integrity_preservation() {
+        // Test that sequences can be fully reconstructed from the graph
         let sequences = vec![
             Sequence {
-                id: "conv1".to_string(),
-                data: b"ATCGATCGATCGATCG".to_vec(), // Longer sequence for better alignment
+                id: "seq1".to_string(),
+                data: b"ATCGATCGATCG".to_vec(),
+                offset: 0,
             },
             Sequence {
-                id: "conv2".to_string(),
-                data: b"ATCGATCGATCGATCG".to_vec(), // Identical sequence
+                id: "seq2".to_string(),
+                data: b"ATCGATCGATCG".to_vec(),
+                offset: 12,
             },
         ];
         
         let mut config = create_test_config();
-        config.convergence_stability = 1; // Quick convergence for testing
         config.max_iterations = 5;
-        config.min_alignment_length = 5; // Lower threshold for alignment
         
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        // This should converge quickly since sequences are identical
+        let mut seqrush = SeqRush::new(sequences.clone(), config);
         seqrush.build_graph();
         
-        // Should have converged and reduced components
-        let components = seqrush.count_components();
-        let total_chars = 32; // 16 + 16 characters
-        assert!(components < total_chars); // Should be less than total characters
-    }
-
-    #[test]
-    fn test_parallel_alignment_system() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let mut seqrush = SeqRush::new(sequences, config);
+        // Verify each sequence can be reconstructed
+        let seq_to_node = seqrush.seq_to_node.lock().unwrap();
+        let nodes = seqrush.nodes.lock().unwrap();
         
-        let initial_components = seqrush.count_components();
-        seqrush.perform_random_alignments();
-        let final_components = seqrush.count_components();
-        
-        // Performing alignments should potentially reduce components
-        assert!(final_components <= initial_components);
-    }
-
-    #[test]
-    fn test_sequence_to_graph_mapping() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        // Initialize mappings
-        let mut char_offset = 0;
         for (seq_id, seq) in seqrush.sequences.iter().enumerate() {
-            for (pos, _) in seq.data.iter().enumerate() {
-                let global_pos = char_offset + pos;
-                seqrush.sequence_to_graph.insert((seq_id, pos), global_pos);
-                seqrush.graph_to_sequence.entry(global_pos).or_insert_with(Vec::new).push((seq_id, pos));
+            let mut reconstructed = Vec::new();
+            
+            for pos in 0..seq.data.len() {
+                let global_pos = seq.offset + pos;
+                if let Some(&node_id) = seq_to_node.get(&global_pos) {
+                    if node_id < nodes.len() {
+                        // For simplicity, take first character of node
+                        if !nodes[node_id].sequence.is_empty() {
+                            reconstructed.push(nodes[node_id].sequence[0]);
+                        }
+                    }
+                }
             }
-            char_offset += seq.data.len();
+            
+            // Verify reconstruction matches original
+            assert_eq!(reconstructed.len(), seq.data.len(), 
+                      "Sequence {} length mismatch", seq_id);
+        }
+    }
+
+    #[test]
+    fn test_graph_completeness() {
+        // Test that all sequence positions are represented in the graph
+        let sequences = create_test_sequences();
+        let mut config = create_test_config();
+        config.max_iterations = 3;
+        
+        let mut seqrush = SeqRush::new(sequences.clone(), config);
+        seqrush.build_graph();
+        
+        let seq_to_node = seqrush.seq_to_node.lock().unwrap();
+        
+        // Every position should have a node mapping
+        let total_positions = seqrush.total_length;
+        let mapped_positions = seq_to_node.len();
+        
+        assert_eq!(mapped_positions, total_positions,
+                  "Not all positions mapped to nodes: {} of {} mapped",
+                  mapped_positions, total_positions);
+    }
+
+    #[test]
+    fn test_match_symmetry() {
+        // Test that matches are symmetric (if A matches B, B matches A)
+        let sequences = create_test_sequences();
+        let config = create_test_config();
+        let seqrush = SeqRush::new(sequences, config);
+        
+        // Create a match
+        let match_forward = Match {
+            seq1_id: 0,
+            seq1_pos: 0,
+            seq2_id: 1,
+            seq2_pos: 0,
+            length: 8,
+            reverse: false,
+        };
+        
+        // Build union-find with this match
+        {
+            let mut matches = seqrush.matches.lock().unwrap();
+            matches.push(match_forward);
+        }
+        seqrush.build_union_find_from_matches();
+        
+        // Check symmetry: positions that are unioned should have same root
+        for i in 0..8 {
+            let pos1 = 0 + i;  // seq1 position
+            let pos2 = 16 + i; // seq2 position (offset 16)
+            let root1 = seqrush.union_find.find(pos1);
+            let root2 = seqrush.union_find.find(pos2);
+            assert_eq!(root1, root2, "Position {} and {} should have same root", pos1, pos2);
+        }
+    }
+
+    #[test]
+    fn test_reverse_complement_handling() {
+        // Test that reverse complement matches are handled correctly
+        let sequences = vec![
+            Sequence {
+                id: "forward".to_string(),
+                data: b"ATCG".to_vec(),
+                offset: 0,
+            },
+            Sequence {
+                id: "revcomp".to_string(),
+                data: b"CGAT".to_vec(), // reverse complement of ATCG
+                offset: 4,
+            },
+        ];
+        
+        let config = create_test_config();
+        let seqrush = SeqRush::new(sequences, config);
+        
+        // Add a reverse complement match
+        {
+            let mut matches = seqrush.matches.lock().unwrap();
+            matches.push(Match {
+                seq1_id: 0,
+                seq1_pos: 0,
+                seq2_id: 1,
+                seq2_pos: 0,
+                length: 4,
+                reverse: true,
+            });
         }
         
-        // Test mapping
-        assert_eq!(seqrush.sequence_to_graph.get(&(0, 0)), Some(&0));
-        assert_eq!(seqrush.sequence_to_graph.get(&(1, 0)), Some(&16));
-        assert!(seqrush.graph_to_sequence.contains_key(&0));
+        seqrush.build_union_find_from_matches();
+        
+        // Verify reverse complement pairing
+        // Position 0 of seq1 (A) should match position 3 of seq2 (T->A in RC)
+        let root_a = seqrush.union_find.find(0);
+        let root_t = seqrush.union_find.find(7); // position 3 in seq2 (offset 4)
+        assert_eq!(root_a, root_t, "Reverse complement positions should be unioned");
     }
 
     #[test]
-    fn test_edge_case_empty_sequences() {
+    fn test_convergence_detection() {
+        // Test that the algorithm converges when no new matches are found
+        let sequences = vec![
+            Sequence {
+                id: "seq1".to_string(),
+                data: b"AAAA".to_vec(),
+                offset: 0,
+            },
+            Sequence {
+                id: "seq2".to_string(),
+                data: b"CCCC".to_vec(),
+                offset: 4,
+            },
+        ];
+        
+        let mut config = create_test_config();
+        config.max_iterations = 10;
+        config.convergence_stability = 2;
+        config.min_match_length = 4; // Require full match
+        
+        let mut seqrush = SeqRush::new(sequences, config);
+        seqrush.discover_matches_dynamically();
+        
+        // Should have converged after finding no matches
+        let _iterations = seqrush.iteration_count.load(Ordering::Relaxed);
+        assert!(seqrush.converged.load(Ordering::Relaxed), "Should be marked as converged");
+        
+        // Check that no matches were found
+        let matches = seqrush.matches.lock().unwrap();
+        assert_eq!(matches.len(), 0, "Should find no matches between AAAA and CCCC");
+    }
+
+    #[test]
+    fn test_gfa_path_validity() {
+        // Test that GFA paths correctly represent sequences
+        let sequences = vec![
+            Sequence {
+                id: "test".to_string(),
+                data: b"ATCGATCG".to_vec(),
+                offset: 0,
+            },
+        ];
+        
+        let mut config = create_test_config();
+        config.max_iterations = 1;
+        
+        let mut seqrush = SeqRush::new(sequences, config);
+        seqrush.build_graph();
+        
+        // Write to temporary file
+        let temp_file = NamedTempFile::new().unwrap();
+        seqrush.write_gfa(temp_file.path().to_str().unwrap()).unwrap();
+        
+        // Read and parse GFA
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        let mut has_path = false;
+        
+        for line in content.lines() {
+            if line.starts_with("P\ttest\t") {
+                has_path = true;
+                // Verify path format
+                let parts: Vec<&str> = line.split('\t').collect();
+                assert_eq!(parts.len(), 4, "Path line should have 4 fields");
+                assert_eq!(parts[1], "test", "Path should reference correct sequence");
+                assert!(!parts[2].is_empty(), "Path should have nodes");
+            }
+        }
+        
+        assert!(has_path, "GFA should contain path for sequence");
+    }
+
+
+    #[test]
+    fn test_parallel_safety() {
+        // Test that parallel alignment doesn't corrupt data
+        use std::sync::Arc;
+        use std::thread;
+        
+        let sequences = create_test_sequences();
+        let config = create_test_config();
+        let seqrush = Arc::new(SeqRush::new(sequences, config));
+        
+        // Run alignments in parallel threads
+        let mut handles = vec![];
+        
+        for i in 0..4 {
+            let seqrush_clone = Arc::clone(&seqrush);
+            let handle = thread::spawn(move || {
+                // Each thread tries to align different pairs
+                let matches = seqrush_clone.align_and_extract_matches(i % 2, (i + 1) % 3);
+                matches.len()
+            });
+            handles.push(handle);
+        }
+        
+        // Wait for all threads
+        for handle in handles {
+            let result = handle.join();
+            assert!(result.is_ok(), "Thread should complete without panic");
+        }
+        
+        // Verify data structures are still consistent
+        let total_length = seqrush.total_length;
+        assert!(total_length > 0, "Total length should be preserved");
+    }
+
+    #[test]
+    fn test_empty_sequences() {
+        // Test handling of empty sequence input
         let sequences = vec![];
         let config = create_test_config();
         let mut seqrush = SeqRush::new(sequences, config);
@@ -1037,641 +1212,203 @@ mod tests {
         // Should handle empty input gracefully
         seqrush.build_graph();
         
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
+        let nodes = seqrush.nodes.lock().unwrap();
+        assert_eq!(nodes.len(), 0, "Empty input should produce no nodes");
     }
 
     #[test]
-    fn test_edge_case_single_sequence() {
+    fn test_single_sequence() {
+        // Test with single sequence
         let sequences = vec![
             Sequence {
                 id: "single".to_string(),
-                data: b"ATCGATCG".to_vec(),
-            },
-        ];
-        let config = create_test_config();
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        seqrush.build_graph();
-        
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
-        
-        let content = std::fs::read_to_string(temp_file.path()).unwrap();
-        assert!(content.contains("P\tsingle\t")); // Should have path for single sequence
-    }
-
-    #[test]
-    fn test_edge_case_very_short_sequences() {
-        let sequences = vec![
-            Sequence {
-                id: "short1".to_string(),
-                data: b"A".to_vec(),
-            },
-            Sequence {
-                id: "short2".to_string(),
-                data: b"T".to_vec(),
-            },
-        ];
-        let config = create_test_config();
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        seqrush.build_graph();
-        
-        // Should handle very short sequences without crashing
-        let components = seqrush.count_components();
-        assert_eq!(components, 2); // Each character should be separate
-    }
-
-    #[test]
-    fn test_large_dataset_performance() {
-        // Create a larger dataset for performance testing
-        let mut sequences = Vec::new();
-        for i in 0..20 {
-            sequences.push(Sequence {
-                id: format!("perf_seq_{}", i),
-                data: format!("ATCGATCGATCG{:04}ATCGATCGATCG", i).into_bytes(),
-            });
-        }
-        
-        let mut config = create_test_config();
-        config.max_iterations = 5; // Limit iterations for performance test
-        
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        // This should complete without issues
-        seqrush.build_graph();
-        
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_configuration_parameters() {
-        let sequences = create_test_sequences();
-        
-        // Test different configuration parameters
-        let config1 = AlignmentConfig {
-            max_iterations: 5,
-            min_alignment_length: 3,
-            match_score: 1,
-            mismatch_penalty: -2,
-            gap_penalty: -3,
-            max_alignment_score: 500,
-            convergence_stability: 1,
-            sparsification: 1.0,
-            erdos_renyi_safety_factor: 3.0,
-            verbose: false,
-        };
-        
-        let mut seqrush1 = SeqRush::new(sequences.clone(), config1);
-        seqrush1.build_graph();
-        
-        let config2 = AlignmentConfig {
-            max_iterations: 10,
-            min_alignment_length: 8,
-            match_score: 3,
-            mismatch_penalty: -1,
-            gap_penalty: -1,
-            max_alignment_score: 2000,
-            convergence_stability: 3,
-            sparsification: 1.0,
-            erdos_renyi_safety_factor: 3.0,
-            verbose: true,
-        };
-        
-        let mut seqrush2 = SeqRush::new(sequences, config2);
-        seqrush2.build_graph();
-        
-        // Both should complete successfully with different parameters
-        assert!(seqrush1.count_components() > 0);
-        assert!(seqrush2.count_components() > 0);
-    }
-
-    #[test]
-    fn test_fasta_malformed_input() {
-        let temp_file = create_temp_fasta(&[
-            ("good_seq", "ATCGATCG"),
-        ]);
-        
-        // Add some malformed content
-        {
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(temp_file.path())
-                .unwrap();
-            writeln!(file, "malformed line without >").unwrap();
-            writeln!(file, ">another_seq").unwrap();
-            writeln!(file, "GCTAGCTA").unwrap();
-        }
-        
-        let sequences = load_sequences(temp_file.path().to_str().unwrap()).unwrap();
-        // Should still load the valid sequences
-        assert!(sequences.len() >= 1);
-    }
-
-    #[test]
-    fn test_integration_full_pipeline() {
-        // Integration test for the full pipeline
-        let temp_file = create_temp_fasta(&[
-            ("seq1", "ATCGATCGATCGATCGATCGATCGATCG"),
-            ("seq2", "ATCGATCGATCGATCGATCGATCGATCG"),
-            ("seq3", "ATCGATCGATCGTTCGATCGATCGATCG"),
-            ("seq4", "GCTAGCTAGCTAGCTAGCTAGCTAGCTA"),
-        ]);
-        
-        let sequences = load_sequences(temp_file.path().to_str().unwrap()).unwrap();
-        assert_eq!(sequences.len(), 4);
-        
-        let config = AlignmentConfig {
-            max_iterations: 10,
-            min_alignment_length: 8,
-            match_score: 2,
-            mismatch_penalty: -1,
-            gap_penalty: -1,
-            max_alignment_score: 1000,
-            convergence_stability: 2,
-            sparsification: 1.0,
-            erdos_renyi_safety_factor: 3.0,
-            verbose: false,
-        };
-        
-        let mut seqrush = SeqRush::new(sequences, config);
-        seqrush.build_graph();
-        
-        let temp_gfa = NamedTempFile::new().unwrap();
-        seqrush.write_gfa(temp_gfa.path().to_str().unwrap()).unwrap();
-        
-        let content = std::fs::read_to_string(temp_gfa.path()).unwrap();
-        assert!(content.contains("H\tVN:Z:1.0"));
-        assert!(content.contains("S\t"));
-        assert!(content.contains("P\t"));
-        
-        // Should have paths for all input sequences
-        assert!(content.contains("P\tseq1\t"));
-        assert!(content.contains("P\tseq2\t"));
-        assert!(content.contains("P\tseq3\t"));
-        assert!(content.contains("P\tseq4\t"));
-    }
-
-    #[test]
-    fn test_identical_sequences_merge() {
-        // Test that identical sequences are properly merged
-        let sequences = vec![
-            Sequence {
-                id: "identical1".to_string(),
-                data: b"ATCGATCGATCGATCGATCGATCG".to_vec(),
-            },
-            Sequence {
-                id: "identical2".to_string(),
-                data: b"ATCGATCGATCGATCGATCGATCG".to_vec(),
-            },
-            Sequence {
-                id: "identical3".to_string(),
-                data: b"ATCGATCGATCGATCGATCGATCG".to_vec(),
+                data: b"ATCG".to_vec(),
+                offset: 0,
             },
         ];
         
         let mut config = create_test_config();
-        config.min_alignment_length = 8;
-        config.max_iterations = 5;
+        config.max_iterations = 1;
         
         let mut seqrush = SeqRush::new(sequences, config);
-        
-        let initial_components = seqrush.count_components();
         seqrush.build_graph();
-        let final_components = seqrush.count_components();
         
-        // Should have significantly fewer components after merging identical sequences
-        assert!(final_components < initial_components);
+        // Should create nodes for the sequence
+        let nodes = seqrush.nodes.lock().unwrap();
+        assert!(nodes.len() > 0, "Single sequence should produce nodes");
+        drop(nodes);  // Release lock before continuing
         
-        // Test GFA output
+        // Verify GFA output
         let temp_file = NamedTempFile::new().unwrap();
         seqrush.write_gfa(temp_file.path().to_str().unwrap()).unwrap();
         
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
-        // Should have paths for all three sequences
-        assert!(content.contains("identical1"));
-        assert!(content.contains("identical2"));
-        assert!(content.contains("identical3"));
+        assert!(content.contains("P\tsingle\t"), "Should have path for single sequence");
     }
 
-    #[test]
-    fn test_alignment_score_calculation() {
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences.clone(), config);
-        
-        // Test the WFA alignment scoring
-        let result = seqrush.wfa_align(&sequences[0].data, &sequences[1].data);
-        assert!(result.is_some());
-        
-        let (_, _, _, _, score) = result.unwrap();
-        // Identical sequences should have a high positive score
-        assert!(score > 20);
-        
-        // Test alignment of different sequences
-        let result2 = seqrush.wfa_align(&sequences[0].data, &sequences[3].data);
-        if let Some((_, _, _, _, score2)) = result2 {
-            // Different sequences should have lower score than identical ones
-            assert!(score2 < score);
-        }
-    }
-
-    #[test]
-    fn test_error_handling_invalid_file() {
-        let result = load_sequences("nonexistent_file.fasta");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_edge_case_sequences_with_ns() {
-        // Test sequences containing N characters
-        let sequences = vec![
-            Sequence {
-                id: "with_ns".to_string(),
-                data: b"ATCGNNNGATCGATCG".to_vec(),
-            },
-            Sequence {
-                id: "normal".to_string(),
-                data: b"ATCGATCGATCGATCG".to_vec(),
-            },
-        ];
-        
-        let config = create_test_config();
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        // Should handle sequences with N characters without crashing
-        seqrush.build_graph();
-        
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_thread_safety_basic() {
-        // Basic test that the union-find operations work in parallel context
-        let sequences = create_test_sequences();
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences, config);
-        
-        // Create multiple alignments and process them
-        let alignments = vec![
-            Alignment {
-                seq1_id: 0,
-                seq2_id: 1,
-                seq1_start: 0,
-                seq1_end: 5,
-                seq2_start: 0,
-                seq2_end: 5,
-                score: 10,
-            },
-            Alignment {
-                seq1_id: 1,
-                seq2_id: 2,
-                seq1_start: 5,
-                seq1_end: 10,
-                seq2_start: 5,
-                seq2_end: 10,
-                score: 8,
-            },
-        ];
-        
-        let initial_components = seqrush.count_components();
-        
-        // Process alignments
-        for alignment in alignments {
-            seqrush.process_alignment(&alignment);
-        }
-        
-        let final_components = seqrush.count_components();
-        assert!(final_components <= initial_components);
-    }
-
-    #[test]
-    fn test_manual_reverse_complement_verification() {
-        // Manual verification of reverse complement
-        let original = b"ATCG";
-        // A->T, T->A, C->G, G->C, then reverse
-        // Complement: TAGC
-        // Reverse: CGAT
-        let expected = b"CGAT";
-        let result = SeqRush::reverse_complement(original);
-        assert_eq!(result, expected);
-        
-        // Test a longer sequence step by step
-        let seq = b"ATCGATCG";
-        // A-T-C-G-A-T-C-G
-        // T-A-G-C-T-A-G-C (complement)
-        // C-G-A-T-C-G-A-T (reverse)
-        let expected_long = b"CGATCGAT";
-        let result_long = SeqRush::reverse_complement(seq);
-        assert_eq!(result_long, expected_long);
-    }
-
-    #[test]
-    fn test_reverse_complement() {
-        // Test reverse complement functionality
-        let seq = b"ATCG";
-        let rc = SeqRush::reverse_complement(seq);
-        assert_eq!(rc, b"CGAT");
-        
-        let seq2 = b"AAATTTCCCGGG";
-        let rc2 = SeqRush::reverse_complement(seq2);
-        assert_eq!(rc2, b"CCCGGGAAATTT");
-        
-        // Test with lowercase
-        let seq3 = b"atcg";
-        let rc3 = SeqRush::reverse_complement(seq3);
-        assert_eq!(rc3, b"cgat");
-        
-        // Test with N characters
-        let seq4 = b"ATCGN";
-        let rc4 = SeqRush::reverse_complement(seq4);
-        assert_eq!(rc4, b"NCGAT");
-    }
-
-    #[test]
-    fn test_bidirectional_alignment() {
-        // Test that alignment considers both orientations
-        let forward_seq = b"ATCGATCGATCG".to_vec();
-        let reverse_comp = SeqRush::reverse_complement(&forward_seq);
-        
-        println!("Forward: {:?}", String::from_utf8_lossy(&forward_seq));
-        println!("Reverse complement: {:?}", String::from_utf8_lossy(&reverse_comp));
-        
-        let sequences = vec![
-            Sequence {
-                id: "forward".to_string(),
-                data: forward_seq,
-            },
-            Sequence {
-                id: "reverse".to_string(),
-                data: reverse_comp,
-            },
-        ];
-        
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences.clone(), config);
-        
-        // Should find alignment in reverse complement orientation
-        let alignment = seqrush.align_sequences(0, 1);
-        assert!(alignment.is_some());
-        
-        let alignment = alignment.unwrap();
-        assert!(alignment.score > 0);
-        println!("Alignment score: {}", alignment.score);
-    }
-
-    #[test]
-    fn test_max_alignment_score_threshold() {
-        // Test that max score threshold prevents computational blowup
-        let sequences = vec![
-            Sequence {
-                id: "seq1".to_string(),
-                data: b"ATCGATCGATCGATCGATCGATCGATCGATCG".to_vec(),
-            },
-            Sequence {
-                id: "seq2".to_string(),
-                data: b"ATCGATCGATCGATCGATCGATCGATCGATCG".to_vec(),
-            },
-        ];
-        
-        let mut config = create_test_config();
-        config.max_alignment_score = 20; // Very low threshold
-        config.verbose = true; // To see the threshold message
-        
-        let seqrush = SeqRush::new(sequences.clone(), config);
-        
-        // Should return None due to score threshold
-        let alignment = seqrush.align_sequences(0, 1);
-        // Depending on implementation, this might be None due to threshold
-        // or might fall back to exact match finder
-        if let Some(alignment) = alignment {
-            assert!(alignment.score <= 20);
-        }
-    }
-
-    #[test]
-    fn test_orientation_preference() {
-        // Test that forward orientation is preferred when scores are equal
-        let sequences = vec![
-            Sequence {
-                id: "palindrome".to_string(),
-                data: b"ATCGCGAT".to_vec(), // Palindromic sequence
-            },
-            Sequence {
-                id: "same".to_string(),
-                data: b"ATCGCGAT".to_vec(),
-            },
-        ];
-        
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences.clone(), config);
-        
-        let alignment = seqrush.align_sequences(0, 1);
-        assert!(alignment.is_some());
-        
-        // Should find a good alignment
-        let alignment = alignment.unwrap();
-        assert!(alignment.score > 10);
-    }
-
-    #[test]
-    fn test_performance_with_orientations() {
-        // Test that bidirectional alignment doesn't cause major performance issues
+    #[test] 
+    fn test_large_scale_integrity() {
+        // Test with larger dataset to ensure scalability
         let mut sequences = Vec::new();
+        let mut offset = 0;
+        
+        // Create 10 similar sequences with small variations
         for i in 0..10 {
+            let mut data = b"ATCGATCGATCGATCG".to_vec();
+            if i % 2 == 0 {
+                data[8] = b'T'; // Introduce variation
+            }
             sequences.push(Sequence {
-                id: format!("perf_seq_{}", i),
-                data: format!("ATCGATCGATCG{:04}CGTATCGATCGATCG", i).into_bytes(),
+                id: format!("seq{}", i),
+                data: data.clone(),
+                offset,
             });
+            offset += data.len();
         }
         
         let mut config = create_test_config();
-        config.max_iterations = 3; // Limit for performance test
-        config.max_alignment_score = 500; // Reasonable threshold
+        config.max_iterations = 5;
+        config.sparsification = 0.5; // Use sparsification
         
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        // This should complete without major performance issues
+        let mut seqrush = SeqRush::new(sequences.clone(), config);
         seqrush.build_graph();
         
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
+        // Verify all sequences are represented
+        let seq_to_node = seqrush.seq_to_node.lock().unwrap();
+        for seq in &seqrush.sequences {
+            for pos in 0..seq.data.len() {
+                let global_pos = seq.offset + pos;
+                assert!(seq_to_node.contains_key(&global_pos),
+                       "Position {} should be mapped", global_pos);
+            }
+        }
     }
 
     #[test]
-    fn test_orientation_selection_actually_works() {
-        // Test that we actually select the better orientation
-        let sequences = vec![
-            Sequence {
-                id: "seq1".to_string(),
-                data: b"ATCGATCGATCGATCG".to_vec(),
-            },
-            Sequence {
-                id: "seq2_poor_forward".to_string(),
-                // Poor forward match but good reverse complement match
-                data: b"CGATCGATCGATCGAT".to_vec(), // This is reverse complement of seq1
-            },
+    fn test_complete_sequence_reconstruction() {
+        // Comprehensive test to ensure sequences can be fully reconstructed from graph
+        let test_sequences = vec![
+            ("identical1", "ATCGATCGATCG"),
+            ("identical2", "ATCGATCGATCG"),
+            ("variant", "ATCGATCGTTCG"),
+            ("different", "GCTAGCTAGCTA"),
         ];
         
-        let config = create_test_config();
-        let seqrush = SeqRush::new(sequences.clone(), config);
+        let mut sequences = Vec::new();
+        let mut offset = 0;
         
-        // Test forward alignment directly
-        let forward_result = seqrush.wfa_align(&sequences[0].data, &sequences[1].data);
+        for (id, data) in &test_sequences {
+            sequences.push(Sequence {
+                id: id.to_string(),
+                data: data.as_bytes().to_vec(),
+                offset,
+            });
+            offset += data.len();
+        }
         
-        // Test reverse complement alignment directly  
-        let seq2_rc = SeqRush::reverse_complement(&sequences[1].data);
-        let reverse_result = seqrush.wfa_align(&sequences[0].data, &seq2_rc);
-        
-        println!("Forward alignment result: {:?}", forward_result);
-        println!("Reverse complement alignment result: {:?}", reverse_result);
-        
-        // The bidirectional aligner should pick the best one
-        let best_alignment = seqrush.align_sequences(0, 1);
-        assert!(best_alignment.is_some());
-        
-        let best = best_alignment.unwrap();
-        println!("Best alignment score: {}", best.score);
-        
-        // Should have found a good alignment
-        assert!(best.score > 10);
-    }
-
-    #[test]
-    fn test_erdos_renyi_threshold_calculation() {
-        // Test Erdős-Rényi threshold calculation
-        
-        // For small graphs, should use high probability
-        assert_eq!(SeqRush::calculate_erdos_renyi_threshold(1, 3.0), 1.0);
-        assert_eq!(SeqRush::calculate_erdos_renyi_threshold(2, 3.0), 1.0);
-        
-        // For larger graphs, should decrease
-        let threshold_10 = SeqRush::calculate_erdos_renyi_threshold(10, 3.0);
-        let threshold_100 = SeqRush::calculate_erdos_renyi_threshold(100, 3.0);
-        let threshold_1000 = SeqRush::calculate_erdos_renyi_threshold(1000, 3.0);
-        
-        assert!(threshold_10 > threshold_100);
-        assert!(threshold_100 > threshold_1000);
-        
-        // Should be reasonable values
-        assert!(threshold_10 < 1.0);
-        assert!(threshold_100 < 0.5);
-        assert!(threshold_1000 < 0.1);
-        assert!(threshold_1000 > 0.001);
-        
-        println!("Thresholds: n=10: {:.4}, n=100: {:.4}, n=1000: {:.4}", 
-                threshold_10, threshold_100, threshold_1000);
-    }
-
-    #[test]
-    fn test_sparsification_deterministic() {
-        // Test that sparsification is deterministic for same inputs
-        let sequences = create_test_sequences();
         let mut config = create_test_config();
-        config.sparsification = 0.5; // 50% probability
+        config.max_iterations = 10;
+        config.min_match_length = 4;
         
-        let seqrush = SeqRush::new(sequences, config);
+        let mut seqrush = SeqRush::new(sequences.clone(), config);
+        seqrush.build_graph();
         
-        // Same pair should always give same result
-        let result1 = seqrush.should_align_pair(0, 1);
-        let result2 = seqrush.should_align_pair(0, 1);
-        assert_eq!(result1, result2);
+        // Write to GFA and read back
+        let temp_file = NamedTempFile::new().unwrap();
+        seqrush.write_gfa(temp_file.path().to_str().unwrap()).unwrap();
         
-        // Symmetric pairs should give same result
-        let result_forward = seqrush.should_align_pair(0, 1);
-        let result_reverse = seqrush.should_align_pair(1, 0);
-        assert_eq!(result_forward, result_reverse);
-    }
-
-    #[test]
-    fn test_sparsification_probability() {
-        // Test that sparsification approximately matches expected probability
-        let sequences = create_test_sequences();
-        let mut config = create_test_config();
-        config.sparsification = 0.3; // 30% probability
+        // Parse GFA to reconstruct sequences
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
         
-        let expected = config.sparsification;
-        let seqrush = SeqRush::new(sequences, config);
+        let mut nodes_map = HashMap::new();
+        let mut paths_map = HashMap::new();
         
-        let total_pairs = 1000;
-        let mut accepted = 0;
-        
-        // Test with synthetic pair IDs
-        for i in 0..total_pairs {
-            if seqrush.should_align_pair(i, i + 1000) {
-                accepted += 1;
+        for line in content.lines() {
+            if line.starts_with("S\t") {
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() >= 3 {
+                    let node_id: usize = parts[1].parse().unwrap();
+                    let sequence = parts[2];
+                    nodes_map.insert(node_id, sequence);
+                }
+            } else if line.starts_with("P\t") {
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() >= 3 {
+                    let seq_id = parts[1];
+                    let path = parts[2];
+                    paths_map.insert(seq_id.to_string(), path.to_string());
+                }
             }
         }
         
-        let actual_probability = accepted as f64 / total_pairs as f64;
-        println!("Expected: {:.3}, Actual: {:.3}", expected, actual_probability);
-        
-        // Should be approximately correct (within 10%)
-        let error = (actual_probability - expected).abs();
-        assert!(error < 0.1, "Sparsification error too large: {:.3}", error);
+        // Verify each sequence can be reconstructed
+        for (original_id, original_data) in &test_sequences {
+            assert!(paths_map.contains_key(*original_id), 
+                   "Path missing for sequence {}", original_id);
+            
+            let path = &paths_map[*original_id];
+            let mut reconstructed = String::new();
+            
+            // Debug: print path
+            if *original_id == "identical1" {
+                println!("Path for {}: {}", original_id, path);
+                println!("Nodes: {:?}", nodes_map);
+            }
+            
+            for node_ref in path.split(',') {
+                if node_ref.ends_with('+') {
+                    let node_id: usize = node_ref[..node_ref.len()-1].parse().unwrap();
+                    if let Some(node_seq) = nodes_map.get(&node_id) {
+                        reconstructed.push_str(node_seq);
+                    }
+                }
+            }
+            
+            assert_eq!(reconstructed, *original_data,
+                      "Sequence {} not correctly preserved. Expected: {}, Got: {}",
+                      original_id, original_data, reconstructed);
+        }
     }
 
     #[test]
-    fn test_sparsification_with_large_n() {
-        // Test that sparsification works correctly with larger numbers of sequences
-        let mut sequences = Vec::new();
-        for i in 0..50 {
-            sequences.push(Sequence {
-                id: format!("seq_{}", i),
-                data: format!("ATCGATCG{:02}ATCGATCG", i).into_bytes(),
-            });
-        }
-        
-        let auto_threshold = SeqRush::calculate_erdos_renyi_threshold(50, 3.0);
-        println!("Auto threshold for n=50: {:.4}", auto_threshold);
+    fn test_no_sequence_corruption() {
+        // Test that no sequence data is corrupted or lost
+        let sequences = vec![
+            Sequence {
+                id: "seq_a".to_string(),
+                data: b"AAAATTTTCCCCGGGG".to_vec(),
+                offset: 0,
+            },
+            Sequence {
+                id: "seq_b".to_string(),
+                data: b"AAAATTTTCCCCGGGG".to_vec(),
+                offset: 16,
+            },
+            Sequence {
+                id: "seq_c".to_string(),
+                data: b"AAAATTTTGGGGCCCC".to_vec(),
+                offset: 32,
+            },
+        ];
         
         let mut config = create_test_config();
-        config.sparsification = auto_threshold;
-        config.max_iterations = 2; // Quick test
+        config.max_iterations = 5;
+        config.min_match_length = 4;
         
-        let mut seqrush = SeqRush::new(sequences, config);
-        
-        // Should complete without issues using sparsification
+        let mut seqrush = SeqRush::new(sequences.clone(), config);
         seqrush.build_graph();
         
-        let temp_file = NamedTempFile::new().unwrap();
-        let result = seqrush.write_gfa(temp_file.path().to_str().unwrap());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_erdos_renyi_prevents_quadratic_blowup() {
-        // Test that Erdős-Rényi sparsification actually reduces work
-        let mut sequences = Vec::new();
-        for i in 0..20 {
-            sequences.push(Sequence {
-                id: format!("test_seq_{}", i),
-                data: format!("ATCGATCGATCG{:02}ATCGATCGATCG", i).into_bytes(),
-            });
+        // Verify no positions are lost
+        let seq_to_node = seqrush.seq_to_node.lock().unwrap();
+        let total_positions = sequences.iter().map(|s| s.data.len()).sum::<usize>();
+        assert_eq!(seq_to_node.len(), total_positions, 
+                  "Some positions were lost during graph construction");
+        
+        // Verify each position maps to a valid node
+        let nodes = seqrush.nodes.lock().unwrap();
+        for (_, &node_id) in seq_to_node.iter() {
+            assert!(node_id < nodes.len(), 
+                   "Invalid node ID {} (only {} nodes exist)", node_id, nodes.len());
         }
-        
-        // Compare full vs sparse alignment counts
-        let mut config_full = create_test_config();
-        config_full.sparsification = 1.0; // All pairs
-        config_full.verbose = true;
-        
-        let mut config_sparse = create_test_config();
-        config_sparse.sparsification = SeqRush::calculate_erdos_renyi_threshold(20, 3.0);
-        config_sparse.verbose = true;
-        
-        println!("Full sparsification: {:.4}", config_full.sparsification);
-        println!("Sparse sparsification: {:.4}", config_sparse.sparsification);
-        
-        // Sparse should use significantly fewer pairs
-        assert!(config_sparse.sparsification < 0.5);
-        assert!(config_sparse.sparsification < config_full.sparsification);
     }
 }

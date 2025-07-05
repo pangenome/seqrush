@@ -300,6 +300,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
+name = "lib_wfa2"
+version = "0.1.0"
+source = "git+https://github.com/AndreaGuarracino/lib_wfa2#879c59adc1ffe67056ba38b7a27adf33d3595348"
+
+[[package]]
 name = "libc"
 version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -526,6 +531,7 @@ version = "0.1.0"
 dependencies = [
  "assert_fs",
  "clap",
+ "lib_wfa2",
  "predicates",
  "rand",
  "rayon",

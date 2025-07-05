@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# wfa2 = { git = "https://github.com/AndreaGuarracino/lib_wfa2", branch = "main" }
+lib_wfa2 = { git = "https://github.com/AndreaGuarracino/lib_wfa2" }
 union-find = "0.3"
 uf_rush = "0.2"
 rayon = "1.7"
