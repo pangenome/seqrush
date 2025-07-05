@@ -73,7 +73,7 @@ seqrush \
   -o graph.gfa \              # Output GFA file
   -t 8 \                      # Number of threads (default: 4)
   -k 15 \                     # Minimum match length (default: 15)
-  -S "0,5,8,2" \              # Alignment scores: match,mismatch,gap1_open,gap1_extend
+  -S "0,5,8,2,24,1" \         # Alignment scores: match,mismatch,gap1_open,gap1_extend,gap2_open,gap2_extend
   -v                          # Verbose output
 ```
 
@@ -82,11 +82,11 @@ seqrush \
 The `-S/--scores` parameter accepts comma-separated values:
 
 ```bash
-# Standard affine gap (default)
--S "0,5,8,2"  # match=0, mismatch=5, gap_open=8, gap_extend=2
+# Two-piece affine gap model (default)
+-S "0,5,8,2,24,1"  # match=0, mismatch=5, gap1_open=8, gap1_extend=2, gap2_open=24, gap2_extend=1
 
-# Two-piece affine gap model
--S "0,5,8,2,24,1"  # adds gap2_open=24, gap2_extend=1
+# Single affine gap model
+-S "0,5,8,2"  # match=0, mismatch=5, gap_open=8, gap_extend=2
 
 # Custom scoring for high similarity sequences
 -S "0,4,6,1"  # More permissive scoring

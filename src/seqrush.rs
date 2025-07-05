@@ -26,8 +26,8 @@ pub struct Args {
     #[arg(short = 'k', long, default_value = "15")]
     pub min_match_length: usize,
     
-    /// Alignment scores (match,mismatch,gap_open,gap_extend)
-    #[arg(short = 'S', long = "scores", default_value = "0,5,8,2")]
+    /// Alignment scores (match,mismatch,gap_open,gap_extend[,gap2_open,gap2_extend])
+    #[arg(short = 'S', long = "scores", default_value = "0,5,8,2,24,1")]
     pub scores: String,
     
     /// Maximum divergence threshold (0.0-1.0, e.g., 0.1 = 10% divergence)

@@ -139,7 +139,7 @@ mod tests {
             output: output.path().to_str().unwrap().to_string(),
             threads: 1,
             min_match_length,
-            scores: "0,5,8,2".to_string(),
+            scores: "0,5,8,2,24,1".to_string(),
             max_divergence: None,
             verbose: false,
             test_mode: true,
