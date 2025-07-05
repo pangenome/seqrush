@@ -1,7 +1,13 @@
 [package]
 name = "seqrush"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "Lock-free parallel pangenome graph construction"
+repository = "https://github.com/yourusername/seqrush"
+license = "MIT OR Apache-2.0"
+keywords = ["bioinformatics", "pangenome", "graph", "alignment", "parallel"]
+categories = ["science", "command-line-utilities"]
 
 [lib]
 name = "seqrush"
