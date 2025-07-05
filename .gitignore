@@ -1,1 +1,60 @@
-/target
+# Build artifacts
+/target/
+
+# Test outputs and temporary files
+*.gfa
+*.og
+*.log
+*.png
+
+# Test data files (except essential ones)
+test_*.fa
+test_*.fasta
+debug_*.fa
+debug_*.rs
+tiny*.fa
+small_test.fa
+large.fa
+medium.fa
+identical.fa
+tests.fasta
+
+# Analysis scripts and outputs
+divergence_*
+analyze_divergence_*.sh
+divergence_analysis_results.sh
+
+# Temporary and experimental files
+erdos_*
+fixed_*
+final_*
+bidirectional_*
+
+# Keep essential test data
+\!tests/
+\!test_cases.sh
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Keep validation script
+\!validate.py
+
+# Keep essential test file
+\!partition714.del.fa
+EOF < /dev/null
+# Reference repositories (not tracked)
+seqwish/
+seqwish-paper/
