@@ -1,6 +1,6 @@
 # SeqRush
 
-![CI](https://github.com/yourusername/seqrush/actions/workflows/ci.yml/badge.svg) [![codecov](https://codecov.io/gh/yourusername/seqrush/branch/main/graph/badge.svg)](https://codecov.io/gh/yourusername/seqrush)
+![CI](https://github.com/KristopherKubicki/seqrush/actions/workflows/ci.yml/badge.svg) [![codecov](https://codecov.io/gh/KristopherKubicki/seqrush/branch/main/graph/badge.svg)](https://codecov.io/gh/KristopherKubicki/seqrush)
 
 A high-performance, parallel pangenome graph construction tool that implements a simplified seqwish-like algorithm using lock-free union-find data structures.
 
@@ -52,7 +52,7 @@ cat test.gfa
 ### Build from Source
 
 ```bash
-git clone https://github.com/yourusername/seqrush.git
+git clone https://github.com/KristopherKubicki/seqrush.git
 cd seqrush
 cargo build --release
 ```
@@ -208,7 +208,7 @@ If you use SeqRush in your research, please cite:
 ```
 SeqRush: Lock-free parallel pangenome graph construction
 [Your Name], 2024
-https://github.com/yourusername/seqrush
+https://github.com/KristopherKubicki/seqrush
 ```
 
 ## License
