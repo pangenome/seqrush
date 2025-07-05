@@ -1,4 +1,8 @@
 pub mod seqrush;
+pub mod graph_ops;
+
+#[cfg(test)]
+mod compaction_tests;
 
 #[cfg(test)]
 mod tests {
@@ -180,8 +184,10 @@ mod tests {
         
         let (nodes, paths) = run_test_with_sequences(sequences, 1);
         
-        // Should have more than 100 nodes due to SNPs
-        assert!(nodes.len() > 100);
+        // With compaction, we should have fewer nodes than characters
+        // Each SNP creates a branch in the graph
+        assert!(nodes.len() < 100); // Compaction reduces node count
+        assert!(nodes.len() > 4); // But we still have some nodes due to SNPs
         assert_eq!(paths.len(), 4);
     }
 
@@ -424,8 +430,8 @@ mod tests {
         for i in 1..5 {
             assert_eq!(paths[0].1, paths[i].1);
         }
-        // Should have exactly as many nodes as characters
-        assert_eq!(nodes.len(), 150);
+        // With compaction, identical sequences result in a single node
+        assert_eq!(nodes.len(), 1);
     }
 
     #[test]

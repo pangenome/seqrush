@@ -1,11 +1,12 @@
 use clap::Parser;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::fs::File;
 use std::io::{BufWriter, Write, BufRead, BufReader};
 use uf_rush::UFRush;
 use lib_wfa2::affine_wavefront::{AffineWavefronts, MemoryMode, AlignmentStatus};
+use crate::graph_ops::{Graph, Node, Edge};
 
 #[derive(Parser)]
 #[command(name = "seqrush", version = "0.4.0", about = "Dynamic pangenome graph construction")]
@@ -409,20 +410,40 @@ impl SeqRush {
     }
     
     fn write_gfa(&self, output_path: &str, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let file = File::create(output_path)?;
-        let mut writer = BufWriter::new(file);
+        // Build initial graph from union-find
+        let mut graph = self.build_initial_graph(verbose)?;
         
-        // GFA header
-        writeln!(writer, "H\tVN:Z:1.0")?;
+        if verbose {
+            println!("Initial graph: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
+        }
+        
+        // Perform node compaction
+        let compacted = graph.compact_nodes();
+        if verbose {
+            println!("Compacted {} nodes", compacted);
+            println!("After compaction: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
+        }
+        
+        // Perform topological sort
+        graph.topological_sort();
+        if verbose {
+            println!("Completed topological sort");
+        }
+        
+        // Write the graph to GFA
+        self.write_graph_to_gfa(&graph, output_path, verbose)?;
+        
+        Ok(())
+    }
+    
+    fn build_initial_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {
+        let mut graph = Graph::new();
         
         // Track which unions we've seen and their node IDs
         let mut union_to_node: HashMap<usize, usize> = HashMap::new();
-        let mut node_sequences: HashMap<usize, Vec<u8>> = HashMap::new();
         let mut next_node_id = 1;
         
         // Build paths and discover nodes
-        let mut paths = Vec::new();
-        
         for seq in &self.sequences {
             let mut path = Vec::new();
             let mut last_node = None;
@@ -435,10 +456,10 @@ impl SeqRush {
                 let node_id = match union_to_node.get(&union) {
                     Some(&id) => {
                         // Verify this character matches the node's sequence
-                        if let Some(node_seq) = node_sequences.get(&id) {
-                            if !node_seq.is_empty() && node_seq[0] != seq.data[i] {
+                        if let Some(node) = graph.nodes.get(&id) {
+                            if !node.sequence.is_empty() && node.sequence[0] != seq.data[i] {
                                 eprintln!("WARNING: Character mismatch in union {}: {} vs {}", 
-                                         union, node_seq[0] as char, seq.data[i] as char);
+                                         union, node.sequence[0] as char, seq.data[i] as char);
                             }
                         }
                         id
@@ -449,8 +470,13 @@ impl SeqRush {
                         next_node_id += 1;
                         union_to_node.insert(union, id);
                         
-                        // The character at this position becomes the node's sequence
-                        node_sequences.insert(id, vec![seq.data[i]]);
+                        // Create node with single character sequence
+                        let node = Node {
+                            id,
+                            sequence: vec![seq.data[i]],
+                            rank: id as f64, // Initial rank based on creation order
+                        };
+                        graph.nodes.insert(id, node);
                         id
                     }
                 };
@@ -462,48 +488,61 @@ impl SeqRush {
                 }
             }
             
-            paths.push((seq.id.clone(), path));
+            graph.paths.push((seq.id.clone(), path));
         }
         
-        // Write segments (nodes)
-        for node_id in 1..next_node_id {
-            let seq = node_sequences.get(&node_id)
-                .map(|s| String::from_utf8_lossy(s))
-                .unwrap_or_else(|| "N".into());
-            writeln!(writer, "S\t{}\t{}", node_id, seq)?;
+        // Build edges from paths
+        for (_, path) in &graph.paths {
+            for window in path.windows(2) {
+                if let [from, to] = window {
+                    graph.edges.insert(Edge { from: *from, to: *to });
+                }
+            }
         }
         
-        // Write paths and verify integrity
-        for (seq, path) in self.sequences.iter().zip(&paths) {
-            let (seq_id, path) = (&seq.id, &path.1);
-            if !path.is_empty() {
-                // Verify path integrity - reconstruct sequence from graph
-                if verbose {
-                    let mut reconstructed = Vec::new();
-                    for &node_id in path {
-                        if let Some(node_seq) = node_sequences.get(&node_id) {
-                            reconstructed.extend_from_slice(node_seq);
-                        }
-                    }
-                    
-                    if reconstructed != seq.data {
-                        eprintln!("WARNING: Path integrity check failed for sequence {}", seq_id);
-                        eprintln!("  Original length: {}, Reconstructed length: {}", 
-                                 seq.data.len(), reconstructed.len());
-                        
-                        // Find first mismatch
-                        for (i, (&orig, &recon)) in seq.data.iter().zip(&reconstructed).enumerate() {
-                            if orig != recon {
-                                eprintln!("  First mismatch at position {}: {} vs {}", 
-                                         i, orig as char, recon as char);
-                                break;
-                            }
-                        }
-                    } else if verbose {
-                        println!("Path integrity verified for sequence {}", seq_id);
+        // Verify path integrity
+        if verbose {
+            for (seq, (_, path)) in self.sequences.iter().zip(&graph.paths) {
+                let mut reconstructed = Vec::new();
+                for &node_id in path {
+                    if let Some(node) = graph.nodes.get(&node_id) {
+                        reconstructed.extend_from_slice(&node.sequence);
                     }
                 }
                 
+                if reconstructed != seq.data {
+                    eprintln!("WARNING: Path integrity check failed for sequence {}", seq.id);
+                    eprintln!("  Original length: {}, Reconstructed length: {}", 
+                             seq.data.len(), reconstructed.len());
+                } else if verbose {
+                    println!("Path integrity verified for sequence {}", seq.id);
+                }
+            }
+        }
+        
+        Ok(graph)
+    }
+    
+    fn write_graph_to_gfa(&self, graph: &Graph, output_path: &str, _verbose: bool) 
+        -> Result<(), Box<dyn std::error::Error>> {
+        let file = File::create(output_path)?;
+        let mut writer = BufWriter::new(file);
+        
+        // GFA header
+        writeln!(writer, "H\tVN:Z:1.0")?;
+        
+        // Write segments (nodes) in sorted order
+        let mut sorted_nodes: Vec<_> = graph.nodes.values().collect();
+        sorted_nodes.sort_by_key(|n| n.id);
+        
+        for node in sorted_nodes {
+            let seq = String::from_utf8_lossy(&node.sequence);
+            writeln!(writer, "S\t{}\t{}", node.id, seq)?;
+        }
+        
+        // Write paths
+        for (seq_id, path) in &graph.paths {
+            if !path.is_empty() {
                 let path_str = path.iter()
                     .map(|&node| format!("{}+", node))
                     .collect::<Vec<_>>()
@@ -512,21 +551,17 @@ impl SeqRush {
             }
         }
         
-        // Write edges
-        let mut edges = HashSet::new();
-        for (_, path) in &paths {
-            for window in path.windows(2) {
-                if let [from, to] = window {
-                    edges.insert((*from, *to));
-                }
-            }
+        // Write edges in sorted order
+        let mut sorted_edges: Vec<_> = graph.edges.iter().collect();
+        sorted_edges.sort_by_key(|e| (e.from, e.to));
+        
+        for edge in sorted_edges {
+            writeln!(writer, "L\t{}\t+\t{}\t+\t0M", edge.from, edge.to)?;
         }
         
-        for (from, to) in edges {
-            writeln!(writer, "L\t{}\t+\t{}\t+\t0M", from, to)?;
-        }
+        println!("Graph written to {}: {} nodes, {} edges", 
+                 output_path, graph.nodes.len(), graph.edges.len());
         
-        println!("Created {} nodes", next_node_id - 1);
         Ok(())
     }
 }
