@@ -1,29 +1,17 @@
 pub mod seqrush {
-    use clap::Parser;
     use std::fs::{self, File};
     use std::io::{self, Write};
 
-    #[derive(Parser, Debug, Clone)]
+    #[derive(Debug, Clone)]
     pub struct Args {
         /// Path to input FASTA file
         pub sequences: String,
         /// Path to output GFA file
         pub output: String,
-        /// Number of worker threads
-        #[arg(long, default_value_t = 1)]
+        /// Number of worker threads (unused in this stub)
         pub threads: usize,
-        #[arg(long, default_value_t = 15)]
+        /// Minimum match length (unused)
         pub min_match_length: usize,
-        #[arg(long, default_value_t = 0)]
-        pub match_score: i32,
-        #[arg(long, default_value_t = 5)]
-        pub mismatch_penalty: i32,
-        #[arg(long, default_value_t = 8)]
-        pub gap_open: i32,
-        #[arg(long, default_value_t = 2)]
-        pub gap_extend: i32,
-        #[arg(short, long)]
-        pub verbose: bool,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,6 +1,7 @@
 # SeqRush
 
-![CI](https://github.com/KristopherKubicki/seqrush/actions/workflows/ci.yml/badge.svg) [![codecov](https://codecov.io/gh/KristopherKubicki/seqrush/branch/main/graph/badge.svg)](https://codecov.io/gh/KristopherKubicki/seqrush)
+![CI](https://github.com/KristopherKubicki/seqrush/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/KristopherKubicki/seqrush/branch/main/graph/badge.svg)](https://codecov.io/gh/KristopherKubicki/seqrush)
 
 A high-performance, parallel pangenome graph construction tool that implements a simplified seqwish-like algorithm using lock-free union-find data structures.
 
