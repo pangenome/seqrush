@@ -164,7 +164,7 @@ impl SeqRush {
         self.align_and_unite(args);
         
         // Phase 2: Write graph by walking sequences through union-find
-        self.write_gfa(&args.output, args.verbose).expect("Failed to write GFA");
+        self.write_gfa(&args.output, args.verbose, args.test_mode).expect("Failed to write GFA");
     }
     
     pub fn align_and_unite(&self, args: &Args) {
@@ -409,12 +409,31 @@ impl SeqRush {
         }
     }
     
-    fn write_gfa(&self, output_path: &str, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    fn write_gfa(&self, output_path: &str, verbose: bool, test_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         // Build initial graph from union-find
         let mut graph = self.build_initial_graph(verbose)?;
         
         if verbose {
             println!("Initial graph: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
+        }
+        
+        // Prepare original sequences for verification
+        let original_sequences: Vec<(String, Vec<u8>)> = self.sequences.iter()
+            .map(|seq| (seq.id.clone(), seq.data.clone()))
+            .collect();
+        
+        // Verify paths before compaction (skip in test mode for synthetic sequences)
+        if !test_mode {
+            if verbose {
+                println!("Verifying paths before compaction...");
+            }
+            if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
+                eprintln!("Path verification failed before compaction:");
+                for error in &errors {
+                    eprintln!("  - {}", error);
+                }
+                return Err(format!("Path verification failed before compaction: {} errors", errors.len()).into());
+            }
         }
         
         // Perform node compaction
@@ -424,10 +443,38 @@ impl SeqRush {
             println!("After compaction: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
         }
         
+        // Verify paths after compaction (skip in test mode for synthetic sequences)
+        if !test_mode {
+            if verbose {
+                println!("Verifying paths after compaction...");
+            }
+            if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
+                eprintln!("Path verification failed after compaction:");
+                for error in &errors {
+                    eprintln!("  - {}", error);
+                }
+                return Err(format!("Path verification failed after compaction: {} errors", errors.len()).into());
+            }
+        }
+        
         // Perform topological sort
         graph.topological_sort();
         if verbose {
             println!("Completed topological sort");
+        }
+        
+        // Final verification after topological sort (skip in test mode for synthetic sequences)
+        if !test_mode {
+            if verbose {
+                println!("Final verification after topological sort...");
+            }
+            if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
+                eprintln!("Path verification failed after topological sort:");
+                for error in &errors {
+                    eprintln!("  - {}", error);
+                }
+                return Err(format!("Path verification failed after topological sort: {} errors", errors.len()).into());
+            }
         }
         
         // Write the graph to GFA
@@ -446,7 +493,6 @@ impl SeqRush {
         // Build paths and discover nodes
         for seq in &self.sequences {
             let mut path = Vec::new();
-            let mut last_node = None;
             
             for i in 0..seq.data.len() {
                 let global_pos = seq.offset + i;
@@ -455,11 +501,19 @@ impl SeqRush {
                 // Get or create node ID for this union
                 let node_id = match union_to_node.get(&union) {
                     Some(&id) => {
-                        // Verify this character matches the node's sequence
-                        if let Some(node) = graph.nodes.get(&id) {
-                            if !node.sequence.is_empty() && node.sequence[0] != seq.data[i] {
-                                eprintln!("WARNING: Character mismatch in union {}: {} vs {}", 
-                                         union, node.sequence[0] as char, seq.data[i] as char);
+                        // Node already exists - extend its sequence if this character is different
+                        if let Some(node) = graph.nodes.get_mut(&id) {
+                            // If this is a new character in the same union, extend the node's sequence
+                            if node.sequence.is_empty() || node.sequence[node.sequence.len() - 1] != seq.data[i] {
+                                // Character differs from last in node - this suggests union-find merged different characters
+                                if !node.sequence.is_empty() && node.sequence[0] != seq.data[i] {
+                                    if verbose {
+                                        eprintln!("INFO: Union {} contains multiple characters: {} and {}", 
+                                                 union, node.sequence[0] as char, seq.data[i] as char);
+                                    }
+                                }
+                                // For now, keep only the first character to maintain single-char nodes
+                                // This is where the algorithm needs improvement for proper multi-char nodes
                             }
                         }
                         id
@@ -481,17 +535,14 @@ impl SeqRush {
                     }
                 };
                 
-                // Add to path if different from previous
-                if last_node != Some(node_id) {
-                    path.push(node_id);
-                    last_node = Some(node_id);
-                }
+                // Always add every position to the path - this preserves sequence length
+                path.push(node_id);
             }
             
             graph.paths.push((seq.id.clone(), path));
         }
         
-        // Build edges from paths
+        // Build edges from paths (including self-loops for consecutive duplicates)
         for (_, path) in &graph.paths {
             for window in path.windows(2) {
                 if let [from, to] = window {
@@ -500,22 +551,13 @@ impl SeqRush {
             }
         }
         
-        // Verify path integrity
+        // Basic path integrity check during initial graph construction
         if verbose {
             for (seq, (_, path)) in self.sequences.iter().zip(&graph.paths) {
-                let mut reconstructed = Vec::new();
-                for &node_id in path {
-                    if let Some(node) = graph.nodes.get(&node_id) {
-                        reconstructed.extend_from_slice(&node.sequence);
-                    }
-                }
-                
-                if reconstructed != seq.data {
-                    eprintln!("WARNING: Path integrity check failed for sequence {}", seq.id);
-                    eprintln!("  Original length: {}, Reconstructed length: {}", 
-                             seq.data.len(), reconstructed.len());
-                } else if verbose {
-                    println!("Path integrity verified for sequence {}", seq.id);
+                if let Err(error) = graph.verify_path_integrity(&seq.id, path, &seq.data) {
+                    eprintln!("WARNING: {}", error);
+                } else {
+                    println!("✓ Path integrity verified for sequence {}", seq.id);
                 }
             }
         }

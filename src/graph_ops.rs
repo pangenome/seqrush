@@ -220,10 +220,8 @@ impl Graph {
                 to = new_id;
             }
             
-            // Skip self-loops unless they were already present
-            if from != to || (edge.from == edge.to && chain.contains(&edge.from)) {
-                new_edges.insert(Edge { from, to });
-            }
+            // Always include edges, including self-loops (they can occur when consecutive positions are united)
+            new_edges.insert(Edge { from, to });
         }
         
         // Remove internal edges of the chain
@@ -380,6 +378,256 @@ impl Graph {
                     *node_id = new_id;
                 }
             }
+        }
+    }
+    
+    /// Verify that all paths are fully embedded in the graph
+    pub fn verify_path_embedding(&self, verbose: bool) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        
+        for (path_name, path) in &self.paths {
+            if let Err(mut path_errors) = self.verify_single_path(path_name, path, verbose) {
+                errors.append(&mut path_errors);
+            }
+        }
+        
+        if errors.is_empty() {
+            if verbose {
+                println!("✓ All paths are fully embedded in the graph");
+            }
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    
+    /// Verify a single path's embedding
+    fn verify_single_path(&self, path_name: &str, path: &[usize], verbose: bool) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        
+        if path.is_empty() {
+            return Ok(());
+        }
+        
+        // Check 1: All nodes in path exist
+        for &node_id in path {
+            if !self.nodes.contains_key(&node_id) {
+                errors.push(format!("Path '{}': Node {} does not exist", path_name, node_id));
+            }
+        }
+        
+        // Check 2: All consecutive nodes have edges
+        for window in path.windows(2) {
+            let from = window[0];
+            let to = window[1];
+            
+            if !self.edges.contains(&Edge { from, to }) {
+                errors.push(format!("Path '{}': Missing edge {} -> {}", path_name, from, to));
+            }
+        }
+        
+        // Check 3: Path can be reconstructed to valid sequence
+        if let Err(reconstruction_error) = self.reconstruct_path_sequence(path_name, path) {
+            errors.push(reconstruction_error);
+        }
+        
+        if errors.is_empty() && verbose {
+            println!("✓ Path '{}' is fully embedded ({} nodes)", path_name, path.len());
+        }
+        
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    
+    /// Reconstruct sequence from path to verify integrity
+    pub fn reconstruct_path_sequence(&self, path_name: &str, path: &[usize]) -> Result<Vec<u8>, String> {
+        let mut sequence = Vec::new();
+        
+        for &node_id in path {
+            match self.nodes.get(&node_id) {
+                Some(node) => {
+                    if node.sequence.is_empty() {
+                        return Err(format!("Path '{}': Node {} has empty sequence", path_name, node_id));
+                    }
+                    sequence.extend_from_slice(&node.sequence);
+                }
+                None => {
+                    return Err(format!("Path '{}': Node {} not found during reconstruction", path_name, node_id));
+                }
+            }
+        }
+        
+        if sequence.is_empty() && !path.is_empty() {
+            return Err(format!("Path '{}': Reconstruction resulted in empty sequence", path_name));
+        }
+        
+        Ok(sequence)
+    }
+    
+    /// Verify path integrity by comparing reconstructed sequence with original
+    pub fn verify_path_integrity(&self, path_name: &str, path: &[usize], original_sequence: &[u8]) -> Result<(), String> {
+        let reconstructed = self.reconstruct_path_sequence(path_name, path)?;
+        
+        if reconstructed != original_sequence {
+            return Err(format!(
+                "Path '{}': Sequence integrity check failed. Original length: {}, Reconstructed length: {}",
+                path_name, original_sequence.len(), reconstructed.len()
+            ));
+        }
+        
+        Ok(())
+    }
+    
+    /// Check for common path issues
+    pub fn validate_path_structure(&self, verbose: bool) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        
+        // Check for excessive duplicate consecutive nodes in paths
+        // Note: Some duplicates are expected when positions are united by matches
+        for (path_name, path) in &self.paths {
+            let mut consecutive_duplicates = 0;
+            let mut max_consecutive = 0;
+            
+            for window in path.windows(2) {
+                if window[0] == window[1] {
+                    consecutive_duplicates += 1;
+                    max_consecutive = max_consecutive.max(consecutive_duplicates);
+                } else {
+                    consecutive_duplicates = 0;
+                }
+            }
+            
+            // Only flag as error if there are excessive duplicates (>10 consecutive)
+            // This suggests a real problem rather than expected union-find behavior
+            if max_consecutive > 10 {
+                errors.push(format!("Path '{}': Excessive consecutive duplicate nodes (max {} in a row)", 
+                                  path_name, max_consecutive + 1));
+            } else if verbose && max_consecutive > 0 {
+                println!("Info: Path '{}' has up to {} consecutive duplicate nodes (expected from matches)", 
+                        path_name, max_consecutive + 1);
+            }
+        }
+        
+        // Check for orphaned nodes (nodes not in any path)
+        let mut nodes_in_paths = HashSet::new();
+        for (_, path) in &self.paths {
+            for &node_id in path {
+                nodes_in_paths.insert(node_id);
+            }
+        }
+        
+        let orphaned_nodes: Vec<_> = self.nodes.keys()
+            .filter(|&&id| !nodes_in_paths.contains(&id))
+            .collect();
+        
+        if !orphaned_nodes.is_empty() && verbose {
+            println!("Warning: {} nodes are not present in any path", orphaned_nodes.len());
+        }
+        
+        // Check for disconnected components
+        let connected_components = self.find_connected_components();
+        if connected_components.len() > 1 && verbose {
+            println!("Warning: Graph has {} disconnected components", connected_components.len());
+        }
+        
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    
+    /// Find connected components in the graph
+    fn find_connected_components(&self) -> Vec<HashSet<usize>> {
+        let mut visited = HashSet::new();
+        let mut components = Vec::new();
+        
+        // Build adjacency list (undirected)
+        let mut adjacency: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &node_id in self.nodes.keys() {
+            adjacency.insert(node_id, Vec::new());
+        }
+        
+        for edge in &self.edges {
+            adjacency.get_mut(&edge.from).unwrap().push(edge.to);
+            adjacency.get_mut(&edge.to).unwrap().push(edge.from);
+        }
+        
+        // DFS to find components
+        for &node_id in self.nodes.keys() {
+            if !visited.contains(&node_id) {
+                let mut component = HashSet::new();
+                let mut stack = vec![node_id];
+                
+                while let Some(current) = stack.pop() {
+                    if !visited.contains(&current) {
+                        visited.insert(current);
+                        component.insert(current);
+                        
+                        if let Some(neighbors) = adjacency.get(&current) {
+                            for &neighbor in neighbors {
+                                if !visited.contains(&neighbor) {
+                                    stack.push(neighbor);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                components.push(component);
+            }
+        }
+        
+        components
+    }
+    
+    /// Comprehensive verification of graph and paths
+    pub fn comprehensive_verify(&self, original_sequences: Option<&[(String, Vec<u8>)]>, verbose: bool) -> Result<(), Vec<String>> {
+        let mut all_errors = Vec::new();
+        
+        if verbose {
+            println!("Starting comprehensive graph verification...");
+        }
+        
+        // 1. Verify path embedding
+        if let Err(mut errors) = self.verify_path_embedding(verbose) {
+            all_errors.append(&mut errors);
+        }
+        
+        // 2. Validate path structure
+        if let Err(mut errors) = self.validate_path_structure(verbose) {
+            all_errors.append(&mut errors);
+        }
+        
+        // 3. Verify path integrity against original sequences if provided
+        if let Some(original_seqs) = original_sequences {
+            for (seq_name, seq_data) in original_seqs {
+                if let Some((_, path)) = self.paths.iter().find(|(name, _)| name == seq_name) {
+                    if let Err(error) = self.verify_path_integrity(seq_name, path, seq_data) {
+                        all_errors.push(error);
+                    }
+                } else {
+                    all_errors.push(format!("Original sequence '{}' not found in paths", seq_name));
+                }
+            }
+        }
+        
+        if all_errors.is_empty() {
+            if verbose {
+                println!("✓ Comprehensive verification passed");
+            }
+            Ok(())
+        } else {
+            if verbose {
+                println!("✗ Comprehensive verification failed with {} errors", all_errors.len());
+                for error in &all_errors {
+                    println!("  - {}", error);
+                }
+            }
+            Err(all_errors)
         }
     }
 }
