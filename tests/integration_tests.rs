@@ -40,11 +40,10 @@ fn test_performance_scaling() {
             output: output.path().to_str().unwrap().to_string(),
             threads: 1,
             min_match_length: 15,
-            match_score: 0,
-            mismatch_penalty: 5,
-            gap_open: 8,
-            gap_extend: 2,
+            scores: "0,5,8,2".to_string(),
+            max_divergence: None,
             verbose: false,
+            test_mode: true,
         };
         
         let start = Instant::now();
@@ -110,11 +109,10 @@ fn test_real_world_example() {
         output: output.path().to_str().unwrap().to_string(),
         threads: 2,
         min_match_length: 5,
-        match_score: 0,
-        mismatch_penalty: 5,
-        gap_open: 8,
-        gap_extend: 2,
+        scores: "0,5,8,2".to_string(),
+        max_divergence: None,
         verbose: true,
+        test_mode: true,
     };
     
     run_seqrush(args).unwrap();
@@ -142,11 +140,10 @@ fn test_command_line_interface() {
         output: output.path().to_str().unwrap().to_string(),
         threads: 1,
         min_match_length: 15,
-        match_score: 0,
-        mismatch_penalty: 5,
-        gap_open: 8,
-        gap_extend: 2,
+        scores: "0,5,8,2".to_string(),
+        max_divergence: None,
         verbose: false,
+        test_mode: true,
     };
     
     run_seqrush(args).unwrap();
@@ -186,11 +183,10 @@ fn test_parallel_consistency() {
             output: output.path().to_str().unwrap().to_string(),
             threads,
             min_match_length: 10,
-            match_score: 0,
-            mismatch_penalty: 5,
-            gap_open: 8,
-            gap_extend: 2,
+            scores: "0,5,8,2".to_string(),
+            max_divergence: None,
             verbose: false,
+            test_mode: true,
         };
         
         run_seqrush(args).unwrap();

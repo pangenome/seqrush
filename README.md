@@ -73,12 +73,26 @@ seqrush \
   -o graph.gfa \              # Output GFA file
   -t 8 \                      # Number of threads (default: 4)
   -k 15 \                     # Minimum match length (default: 15)
-  --match-score 0 \           # WFA match score (default: 0)
-  --mismatch-penalty 5 \      # WFA mismatch penalty (default: 5)
-  --gap-open 8 \              # WFA gap open penalty (default: 8)
-  --gap-extend 2 \            # WFA gap extend penalty (default: 2)
+  -S "0,5,8,2" \              # Alignment scores: match,mismatch,gap1_open,gap1_extend
   -v                          # Verbose output
 ```
+
+#### Alignment Scoring
+
+The `-S/--scores` parameter accepts comma-separated values:
+
+```bash
+# Standard affine gap (default)
+-S "0,5,8,2"  # match=0, mismatch=5, gap_open=8, gap_extend=2
+
+# Two-piece affine gap model
+-S "0,5,8,2,24,1"  # adds gap2_open=24, gap2_extend=1
+
+# Custom scoring for high similarity sequences
+-S "0,4,6,1"  # More permissive scoring
+```
+
+Note: Two-piece affine gap support requires compatible WFA2 library version.
 
 ### Example Workflow
 
