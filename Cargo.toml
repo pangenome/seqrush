@@ -4,7 +4,7 @@ version = "0.3.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "Lock-free parallel pangenome graph construction"
-repository = "https://github.com/yourusername/seqrush"
+repository = "https://github.com/KristopherKubicki/seqrush"
 license = "MIT OR Apache-2.0"
 keywords = ["bioinformatics", "pangenome", "graph", "alignment", "parallel"]
 categories = ["science", "command-line-utilities"]
@@ -17,33 +17,6 @@ path = "src/lib.rs"
 name = "seqrush"
 path = "src/main.rs"
 
-[[bin]]
-name = "debug_union_find"
-path = "debug_union_find.rs"
-
-[[bin]]
-name = "debug_alignment"
-path = "debug_alignment.rs"
-
-[[bin]]
-name = "debug_cigar"
-path = "debug_cigar.rs"
-
-[[bin]]
-name = "test_match_runs"
-path = "test_match_runs.rs"
-
 [dependencies]
-lib_wfa2 = { git = "https://github.com/AndreaGuarracino/lib_wfa2" }
-union-find = "0.3"
-uf_rush = "0.2"
-rayon = "1.7"
-clap = { version = "4.0", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-rand = "0.8"
 
 [dev-dependencies]
-tempfile = "3.0"
-assert_fs = "1.0"
-predicates = "3.0"
