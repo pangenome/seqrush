@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust: [stable]
+        rust: ['1.87']
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
