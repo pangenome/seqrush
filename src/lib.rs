@@ -1,6 +1,6 @@
 pub mod seqrush {
-    use std::fs::{self, File};
-    use std::io::{self, Write};
+    use std::fs::File;
+    use std::io::{self, BufRead, Write};
 
     #[derive(Debug, Clone)]
     pub struct Args {
@@ -21,29 +21,28 @@ pub mod seqrush {
     }
 
     pub fn load_sequences(path: &str) -> io::Result<Vec<FastaSequence>> {
-        let contents = fs::read_to_string(path)?;
+        let file = File::open(path)?;
+        let reader = io::BufReader::new(file);
         let mut sequences = Vec::new();
         let mut id = None;
-        let mut data = String::new();
-        for line in contents.lines() {
+        let mut data: Vec<u8> = Vec::new();
+        for line in reader.lines() {
+            let line = line?;
             if line.starts_with('>') {
                 if let Some(id_val) = id.take() {
                     sequences.push(FastaSequence {
                         id: id_val,
-                        data: data.as_bytes().to_vec(),
+                        data: data.clone(),
                     });
                     data.clear();
                 }
                 id = Some(line[1..].to_string());
             } else {
-                data.push_str(line.trim());
+                data.extend(line.trim().as_bytes());
             }
         }
         if let Some(id_val) = id {
-            sequences.push(FastaSequence {
-                id: id_val,
-                data: data.as_bytes().to_vec(),
-            });
+            sequences.push(FastaSequence { id: id_val, data });
         }
         Ok(sequences)
     }
