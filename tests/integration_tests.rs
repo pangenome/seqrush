@@ -41,8 +41,42 @@ fn run_seqrush_writes_output() {
     run_seqrush(args).unwrap();
     let content = fs::read_to_string(&out_path).unwrap();
     assert!(content.starts_with("H\tVN:Z:1.0"));
+    assert!(content.contains("P\tp1\tx+,y+\t*"));
+    let links: Vec<_> = content
+        .lines()
+        .filter(|l| l.starts_with('L'))
+        .collect();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0], "L\tx\t+\ty\t+\t0M");
     fs::remove_file(&in_path).unwrap();
     fs::remove_file(&out_path).unwrap();
+}
+
+#[test]
+fn run_seqrush_multi_sequence_links() {
+    let in_path = temp_file("multi_in");
+    let mut f = File::create(&in_path).unwrap();
+    writeln!(f, ">a\nAAAA\n>b\nCCCC\n>c\nGGGG").unwrap();
+    f.sync_all().unwrap();
+    let out_path = temp_file("multi_out");
+    let args = Args {
+        sequences: in_path.to_str().unwrap().to_string(),
+        output: out_path.to_str().unwrap().to_string(),
+        threads: 1,
+        min_match_length: 1,
+    };
+    run_seqrush(args).unwrap();
+    let content = fs::read_to_string(&out_path).unwrap();
+    assert!(content.contains("P\tp1\ta+,b+,c+\t*"));
+    let links: Vec<_> = content
+        .lines()
+        .filter(|l| l.starts_with('L'))
+        .collect();
+    assert_eq!(links.len(), 2);
+    assert!(links.contains(&"L\ta\t+\tb\t+\t0M"));
+    assert!(links.contains(&"L\tb\t+\tc\t+\t0M"));
+    fs::remove_file(in_path).unwrap();
+    fs::remove_file(out_path).unwrap();
 }
 #[test]
 fn load_sequences_empty_input() {

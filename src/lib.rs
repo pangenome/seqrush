@@ -56,17 +56,21 @@ pub mod seqrush {
             let seq_str = String::from_utf8_lossy(&seq.data);
             writeln!(file, "S\t{}\t{}", seq.id, seq_str)?;
         }
-        if sequences.len() > 1 {
-            let path_line = sequences
-                .iter()
-                .map(|s| s.id.clone())
-                .collect::<Vec<_>>()
-                .join(",");
-            writeln!(file, "P\tp1\t{}\t*", path_line)?;
-            writeln!(file, "L\t{}\t+\t{}\t+\t0M", sequences[0].id, sequences[1].id)?;
-        } else if let Some(seq) = sequences.get(0) {
-            writeln!(file, "P\tp1\t{}\t*", seq.id)?;
+        if sequences.is_empty() {
+            return Ok(());
         }
+
+        let path_line = sequences
+            .iter()
+            .map(|s| format!("{}+", s.id))
+            .collect::<Vec<_>>()
+            .join(",");
+        writeln!(file, "P\tp1\t{}\t*", path_line)?;
+
+        for window in sequences.windows(2) {
+            writeln!(file, "L\t{}\t+\t{}\t+\t0M", window[0].id, window[1].id)?;
+        }
+
         Ok(())
     }
 }
