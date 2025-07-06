@@ -28,6 +28,16 @@ fn load_sequences_multiline_sequence() {
 }
 
 #[test]
+fn load_sequences_windows_newlines() {
+    let mut file = temp_file();
+    write!(file, ">id\r\nACGT\r\n").unwrap();
+    file.as_file_mut().sync_all().unwrap();
+    let seqs = load_sequences(file.path().to_str().unwrap()).unwrap();
+    assert_eq!(seqs.len(), 1);
+    assert_eq!(seqs[0].data, b"ACGT".to_vec());
+}
+
+#[test]
 fn run_seqrush_writes_output() {
     let mut in_file = temp_file();
     writeln!(in_file, ">x\nAAAA\n>y\nGGGG").unwrap();
