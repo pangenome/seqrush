@@ -179,6 +179,8 @@ cargo doc --open
 
 ### Project Structure
 
+![Project Structure](docs/project_structure.svg)
+
 ```
 seqrush/
 ├── src/
