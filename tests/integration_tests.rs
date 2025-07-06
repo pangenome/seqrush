@@ -129,6 +129,9 @@ fn run_seqrush_missing_input() {
     };
     let result = run_seqrush(args);
     assert!(result.is_err());
+    if out_path.exists() {
+        fs::remove_file(out_path).unwrap();
+    }
 }
 
 use std::process::Command;
