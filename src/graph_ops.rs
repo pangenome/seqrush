@@ -189,28 +189,12 @@ impl Graph {
         let new_id = chain[0]; // Use first node's ID
         let mut new_sequence = Vec::new();
         let mut total_rank = 0.0;
-        let mut seen_sequences = HashSet::new();
         
-        // Only concatenate unique sequences to avoid duplicating when nodes represent the same character
+        // Concatenate all sequences in the chain
         for &node_id in chain {
             if let Some(node) = self.nodes.get(&node_id) {
-                // Check if this is a truly different sequence or just a repeat
-                let seq_hash = node.sequence.clone();
-                if chain.len() > 1 && !seen_sequences.contains(&seq_hash) {
-                    new_sequence.extend_from_slice(&node.sequence);
-                    seen_sequences.insert(seq_hash);
-                } else if chain.len() == 1 {
-                    // Single node "chain" - keep as is
-                    new_sequence = node.sequence.clone();
-                }
+                new_sequence.extend_from_slice(&node.sequence);
                 total_rank += node.rank;
-            }
-        }
-        
-        // If all nodes in chain had the same sequence, keep just one copy
-        if new_sequence.is_empty() && chain.len() > 0 {
-            if let Some(node) = self.nodes.get(&chain[0]) {
-                new_sequence = node.sequence.clone();
             }
         }
         
@@ -264,25 +248,48 @@ impl Graph {
         
         self.edges = new_edges;
         
-        // Update paths - simpler approach that preserves all occurrences
-        for (path_name, path) in &mut self.paths {
+        // Update paths - replace consecutive chain nodes with single merged node
+        for (_, path) in &mut self.paths {
             let mut new_path = Vec::new();
+            let mut i = 0;
             
-            for &node_id in path.iter() {
+            while i < path.len() {
+                let node_id = path[i];
+                
                 if chain.contains(&node_id) {
-                    // Any node in the chain gets replaced with the new merged node
-                    new_path.push(new_id);
+                    // Found a chain node - check if this is the start of the chain in the path
+                    let chain_start_idx = chain.iter().position(|&n| n == node_id);
+                    
+                    if let Some(start_idx) = chain_start_idx {
+                        // Check if the path follows the chain order
+                        let mut chain_len_in_path = 1;
+                        
+                        for j in 1..chain.len() - start_idx {
+                            if i + j < path.len() && path[i + j] == chain[start_idx + j] {
+                                chain_len_in_path += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        if chain_len_in_path > 1 {
+                            // Path follows chain for multiple nodes - replace with single merged node
+                            new_path.push(new_id);
+                            i += chain_len_in_path;
+                        } else {
+                            // Single occurrence or doesn't follow chain order
+                            new_path.push(new_id);
+                            i += 1;
+                        }
+                    } else {
+                        // Shouldn't happen, but handle gracefully
+                        new_path.push(new_id);
+                        i += 1;
+                    }
                 } else {
                     new_path.push(node_id);
+                    i += 1;
                 }
-            }
-            
-            // Debug: Check if we're creating issues
-            let old_len = path.len();
-            let new_len = new_path.len();
-            if old_len != new_len {
-                eprintln!("WARNING: Path {} length changed during compaction: {} -> {}", 
-                         path_name, old_len, new_len);
             }
             
             *path = new_path;

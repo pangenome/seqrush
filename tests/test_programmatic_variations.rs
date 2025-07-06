@@ -157,7 +157,7 @@ fn test_programmatic_inversions_scale() {
         max_divergence: Some(0.1),
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -214,7 +214,7 @@ fn test_gc_content_variation() {
         max_divergence: Some(0.2),
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -291,7 +291,7 @@ fn test_motif_based_variations() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -355,7 +355,7 @@ fn test_microsatellite_instability() {
         max_divergence: Some(0.1),
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -423,7 +423,7 @@ fn test_complex_structural_variation_patterns() {
         max_divergence: Some(0.1),
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -502,7 +502,7 @@ fn test_nested_tandem_inversions() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_inversion_aware_seqrush(args).unwrap();

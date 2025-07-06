@@ -36,7 +36,7 @@ fn test_simple_inversion() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -102,7 +102,7 @@ fn test_complex_rearrangement() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -158,7 +158,7 @@ fn test_self_inverse_palindrome() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();

@@ -27,7 +27,6 @@ mod compaction_tests {
     }
     
     #[test]
-    #[ignore] // TODO: Fix compaction logic to handle repeated sequences correctly
     fn test_basic_compaction() {
         let mut graph = create_test_graph();
         
@@ -276,7 +275,6 @@ mod compaction_tests {
     }
     
     #[test]
-    #[ignore] // TODO: Fix compaction logic to handle repeated sequences correctly
     fn test_path_verification_after_compaction() {
         let mut graph = create_test_graph();
         

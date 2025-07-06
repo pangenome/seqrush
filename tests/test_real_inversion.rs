@@ -37,7 +37,7 @@ fn test_real_inversion_case() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     println!("Testing real inversion case...");
@@ -73,7 +73,7 @@ fn test_larger_inversion_with_unique_content() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     println!("\nTesting larger inversion with unique content...");
@@ -109,7 +109,7 @@ fn test_inversion_with_snps() {
         max_divergence: Some(0.2), // Allow 20% divergence
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     println!("\nTesting inversion detection with SNPs...");

@@ -154,7 +154,7 @@ mod tests {
             max_divergence: None,
             verbose: false,
             test_mode: true,
-            enable_compaction: false, // Disable compaction until it's fixed
+            no_compact: false, // Enable compaction for tests
         };
         
         run_seqrush(args).unwrap();

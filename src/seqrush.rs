@@ -43,9 +43,9 @@ pub struct Args {
     #[arg(long, hide = true)]
     pub test_mode: bool,
     
-    /// Enable node compaction (experimental - may cause issues with repeated sequences)
-    #[arg(long, hide = true)]
-    pub enable_compaction: bool,
+    /// Disable node compaction (compaction merges linear chains of nodes)
+    #[arg(long = "no-compact", default_value = "false")]
+    pub no_compact: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -443,8 +443,8 @@ impl SeqRush {
             }
         }
         
-        // Perform node compaction if enabled
-        if args.enable_compaction {
+        // Perform node compaction unless disabled
+        if !args.no_compact {
             let compacted = graph.compact_nodes();
             if verbose {
                 println!("Compacted {} nodes", compacted);

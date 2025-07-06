@@ -34,7 +34,7 @@ fn test_no_untraversed_edges_in_output() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     // Run seqrush with edge validation
@@ -74,7 +74,7 @@ fn test_self_loops_in_gfa() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush(args).unwrap();
@@ -117,7 +117,7 @@ fn test_verbose_mode_shows_validation() {
         max_divergence: None,
         verbose: true,  // Enable verbose
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     // Capture output by running the command
@@ -168,7 +168,7 @@ fn test_complex_graph_produces_valid_gfa() {
         max_divergence: Some(0.2),
         verbose: false,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush(args).unwrap();

@@ -52,7 +52,7 @@ fn test_simple_forward_sequence() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -86,7 +86,7 @@ fn test_reverse_complement_alignment() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -123,7 +123,7 @@ fn test_palindromic_sequence() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -154,7 +154,7 @@ fn test_inversion_between_sequences() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -195,7 +195,7 @@ fn test_complex_rearrangement() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -224,7 +224,7 @@ fn test_self_alignment_with_repeats() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -290,7 +290,7 @@ fn test_multiple_sequence_alignment() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
-            enable_compaction: false,
+            no_compact: true,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
