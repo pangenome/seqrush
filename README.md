@@ -47,7 +47,7 @@ cat test.gfa
 
 ### Prerequisites
 
-- Rust 1.70 or later
+- Rust via `rustup` (the required version is pinned in `rust-toolchain.toml`)
 - Git
 
 ### Build from Source
@@ -55,6 +55,7 @@ cat test.gfa
 ```bash
 git clone https://github.com/KristopherKubicki/seqrush.git
 cd seqrush
+# rustup will automatically install the toolchain defined in `rust-toolchain.toml`
 cargo build --release
 ```
 
