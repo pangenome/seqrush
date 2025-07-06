@@ -22,6 +22,7 @@ fn load_sequences_parses_fasta() {
     let seqs = load_sequences(path.to_str().unwrap()).unwrap();
     assert_eq!(seqs.len(), 2);
     assert_eq!(seqs[0].id, "a");
+    fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -38,6 +39,8 @@ fn run_seqrush_writes_output() {
         min_match_length: 1,
     };
     run_seqrush(args).unwrap();
-    let content = fs::read_to_string(out_path).unwrap();
+    let content = fs::read_to_string(&out_path).unwrap();
     assert!(content.starts_with("H\tVN:Z:1.0"));
+    fs::remove_file(&in_path).unwrap();
+    fs::remove_file(&out_path).unwrap();
 }
