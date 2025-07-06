@@ -163,6 +163,32 @@ fn cli_parses_flags() {
     assert!(status.success());
 }
 
+#[cfg(feature = "cli")]
+#[test]
+fn cli_defaults() {
+    let mut in_file = temp_file();
+    writeln!(in_file, ">x\nAAAA\n>y\nGGGG").unwrap();
+    in_file.as_file_mut().sync_all().unwrap();
+    let out_file = temp_file();
+    let status = Command::new(env!("CARGO_BIN_EXE_seqrush"))
+        .args([
+            "-s",
+            in_file.path().to_str().unwrap(),
+            "-o",
+            out_file.path().to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let content = fs::read_to_string(out_file.path()).unwrap();
+    assert!(content.starts_with("H\tVN:Z:1.0"));
+    assert!(content.contains("P\tp1\tx+,y+\t*"));
+    let links: Vec<_> = content.lines().filter(|l| l.starts_with('L')).collect();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0], "L\tx\t+\ty\t+\t0M");
+}
+
 #[test]
 fn run_seqrush_single_sequence_no_links() {
     let mut fasta_file = temp_file();

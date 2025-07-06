@@ -1,4 +1,4 @@
-use seqrush::{Args, run_seqrush};
+use seqrush::{run_seqrush, Args};
 
 #[cfg(feature = "cli")]
 mod cli;
@@ -23,4 +23,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_seqrush(args)?;
     Ok(())
 }
-

@@ -1,11 +1,11 @@
 #[cfg(feature = "cli")]
-use clap::Parser;
-#[cfg(feature = "cli")]
 use crate::Args;
+#[cfg(feature = "cli")]
+use clap::Parser;
 
 #[cfg(feature = "cli")]
 #[derive(Parser)]
-#[command(name = "seqrush", about = "Build pangenome graphs")] 
+#[command(name = "seqrush", about = "Build pangenome graphs")]
 struct CliArgs {
     /// Input FASTA file
     #[arg(short = 's', long)]
@@ -35,4 +35,3 @@ pub fn parse() -> Args {
         min_match_length: cli.min_match_length,
     }
 }
-
