@@ -1,4 +1,4 @@
-use seqrush::{Args, run_seqrush, load_sequences};
+use seqrush::{load_sequences, run_seqrush, Args};
 use std::fs::{self, File};
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -43,10 +43,7 @@ fn run_seqrush_writes_output() {
     let content = fs::read_to_string(out_file.path()).unwrap();
     assert!(content.starts_with("H\tVN:Z:1.0"));
     assert!(content.contains("P\tp1\tx+,y+\t*"));
-    let links: Vec<_> = content
-        .lines()
-        .filter(|l| l.starts_with('L'))
-        .collect();
+    let links: Vec<_> = content.lines().filter(|l| l.starts_with('L')).collect();
     assert_eq!(links.len(), 1);
     assert_eq!(links[0], "L\tx\t+\ty\t+\t0M");
 }
@@ -66,10 +63,7 @@ fn run_seqrush_multi_sequence_links() {
     run_seqrush(args).unwrap();
     let content = fs::read_to_string(out_file.path()).unwrap();
     assert!(content.contains("P\tp1\ta+,b+,c+\t*"));
-    let links: Vec<_> = content
-        .lines()
-        .filter(|l| l.starts_with('L'))
-        .collect();
+    let links: Vec<_> = content.lines().filter(|l| l.starts_with('L')).collect();
     assert_eq!(links.len(), 2);
     assert!(links.contains(&"L\ta\t+\tb\t+\t0M"));
     assert!(links.contains(&"L\tb\t+\tc\t+\t0M"));
@@ -118,6 +112,7 @@ fn run_seqrush_missing_input() {
     };
     let result = run_seqrush(args);
     assert!(result.is_err());
+    let out_path = out_file.path();
     if out_path.exists() {
         fs::remove_file(out_path).unwrap();
     }
@@ -139,10 +134,7 @@ fn cli_no_arguments() {
 #[test]
 fn cli_missing_output() {
     let exe = env!("CARGO_BIN_EXE_seqrush");
-    let output = Command::new(exe)
-        .args(["-s", "somefile"]) 
-        .output()
-        .unwrap();
+    let output = Command::new(exe).args(["-s", "somefile"]).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("required arguments"));
@@ -196,5 +188,4 @@ fn run_seqrush_single_sequence_no_links() {
     assert_eq!(p_lines.len(), 1);
     assert_eq!(p_lines[0], &"P\tp1\tid+\t*");
     assert!(lines.iter().all(|l| !l.starts_with("L\t")));
-
 }
