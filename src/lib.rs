@@ -36,16 +36,31 @@ pub struct FastaSequence {
 ///
 /// # Errors
 ///
-/// Returns an [`io::Error`] if the file cannot be read.
+/// Returns an [`io::Error`] if the file cannot be read or the first
+/// nonempty line does not start with a FASTA header marker `>`.
 pub fn load_sequences(path: &str) -> io::Result<Vec<FastaSequence>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
     let mut sequences = Vec::new();
     let mut id = None;
     let mut data: Vec<u8> = Vec::new();
+    let mut checked_first = false;
     for line in reader.lines() {
         let line = line?;
-        if line.starts_with('>') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !checked_first {
+            if !trimmed.starts_with('>') {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "FASTA file must start with '>'",
+                ));
+            }
+            checked_first = true;
+        }
+        if trimmed.starts_with('>') {
             if let Some(id_val) = id.take() {
                 sequences.push(FastaSequence {
                     id: id_val,
@@ -53,9 +68,9 @@ pub fn load_sequences(path: &str) -> io::Result<Vec<FastaSequence>> {
                 });
                 data.clear();
             }
-            id = Some(line[1..].to_string());
+            id = Some(trimmed[1..].to_string());
         } else {
-            data.extend(line.trim().as_bytes());
+            data.extend(trimmed.as_bytes());
         }
     }
     if let Some(id_val) = id {
