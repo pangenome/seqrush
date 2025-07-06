@@ -26,6 +26,18 @@ fn load_sequences_parses_fasta() {
 }
 
 #[test]
+fn load_sequences_multiline_sequence() {
+    let path = temp_file("multi");
+    let mut f = File::create(&path).unwrap();
+    writeln!(f, ">id\nACG\nTGA").unwrap();
+    f.sync_all().unwrap();
+    let seqs = load_sequences(path.to_str().unwrap()).unwrap();
+    assert_eq!(seqs.len(), 1);
+    assert_eq!(seqs[0].data, b"ACGTGA".to_vec());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn run_seqrush_writes_output() {
     let in_path = temp_file("in");
     let mut f = File::create(&in_path).unwrap();
