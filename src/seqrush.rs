@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::fs::File;
 use std::io::{BufWriter, Write, BufRead, BufReader};
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 use uf_rush::UFRush;
 use lib_wfa2::affine_wavefront::{AffineWavefronts, MemoryMode, AlignmentStatus};
 use crate::graph_ops::{Graph, Node, Edge};
@@ -46,6 +48,10 @@ pub struct Args {
     /// Disable node compaction (compaction merges linear chains of nodes)
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
+    
+    /// Sparsification factor (keep this fraction of matches, 1.0 = keep all, 'auto' for automatic)
+    #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
+    pub sparsification: String,
 }
 
 #[derive(Clone, Debug)]
@@ -146,10 +152,11 @@ pub struct SeqRush {
     pub sequences: Vec<Sequence>,
     pub total_length: usize,
     pub union_find: Arc<UFRush>,
+    pub sparsity_threshold: u64,
 }
 
 impl SeqRush {
-    pub fn new(sequences: Vec<Sequence>) -> Self {
+    pub fn new(sequences: Vec<Sequence>, sparsity_threshold: u64) -> Self {
         let total_length = sequences.iter().map(|s| s.data.len()).sum();
         let union_find = Arc::new(UFRush::new(total_length));
         
@@ -157,6 +164,7 @@ impl SeqRush {
             sequences,
             total_length,
             union_find,
+            sparsity_threshold,
         }
     }
     
@@ -201,6 +209,14 @@ impl SeqRush {
     fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores) {
         let seq1 = &self.sequences[idx1];
         let seq2 = &self.sequences[idx2];
+        
+        // Apply sparsification at the alignment level
+        if !self.should_align_pair(idx1, idx2) {
+            if args.verbose {
+                println!("Skipping alignment {} vs {} (sparsification)", seq1.id, seq2.id);
+            }
+            return;
+        }
         
         if args.verbose {
             println!("Aligning {} vs {}", seq1.id, seq2.id);
@@ -632,6 +648,23 @@ impl SeqRush {
         
         Ok(())
     }
+    
+    fn should_align_pair(&self, idx1: usize, idx2: usize) -> bool {
+        if self.sparsity_threshold == u64::MAX {
+            return true; // No sparsification
+        }
+        
+        // Hash the sequence index pair to get a deterministic pseudo-random value
+        let mut hasher = DefaultHasher::new();
+        // Use min/max to ensure consistent hashing regardless of order
+        let (min_idx, max_idx) = if idx1 < idx2 { (idx1, idx2) } else { (idx2, idx1) };
+        min_idx.hash(&mut hasher);
+        max_idx.hash(&mut hasher);
+        let hash_value = hasher.finish();
+        
+        // Keep the alignment if hash is below threshold
+        hash_value <= self.sparsity_threshold
+    }
 }
 
 pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
@@ -680,7 +713,31 @@ pub fn run_seqrush(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let sequences = load_sequences(&args.sequences)?;
     println!("Loaded {} sequences", sequences.len());
     
-    let mut seqrush = SeqRush::new(sequences);
+    // Calculate sparsification threshold
+    let sparsity_threshold = if args.sparsification == "auto" {
+        // Use Erdős-Rényi model: keep 10 * log(n) / n fraction of matches
+        let n = sequences.len() as f64;
+        let fraction = (10.0 * n.ln() / n).min(1.0);
+        println!("Auto sparsification: keeping {:.2}% of matches (n={})", fraction * 100.0, sequences.len());
+        (fraction * u64::MAX as f64) as u64
+    } else {
+        match args.sparsification.parse::<f64>() {
+            Ok(frac) if frac >= 0.0 && frac <= 1.0 => {
+                if frac == 1.0 {
+                    u64::MAX
+                } else {
+                    println!("Sparsification: keeping {:.2}% of matches", frac * 100.0);
+                    (frac * u64::MAX as f64) as u64
+                }
+            }
+            _ => {
+                eprintln!("Invalid sparsification value: {}. Using 1.0 (no sparsification)", args.sparsification);
+                u64::MAX
+            }
+        }
+    };
+    
+    let mut seqrush = SeqRush::new(sequences, sparsity_threshold);
     seqrush.build_graph(&args);
     
     println!("Graph written to {}", args.output);

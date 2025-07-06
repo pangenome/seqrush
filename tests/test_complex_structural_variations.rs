@@ -91,6 +91,7 @@ fn test_inverted_repeats() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -133,6 +134,7 @@ fn test_complex_cnv_repeats() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -185,6 +187,7 @@ fn test_y_shaped_breakpoint() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -229,6 +232,7 @@ fn test_nested_inversions() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -279,6 +283,7 @@ fn test_random_rearrangements() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -323,6 +328,7 @@ fn test_tandem_repeat_polymorphism() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -374,6 +380,7 @@ fn test_complex_nested_variations() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -424,6 +431,7 @@ fn test_interspersed_repeats_with_inversions() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -482,6 +490,7 @@ fn test_breakpoint_resolution() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();

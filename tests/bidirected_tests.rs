@@ -53,6 +53,7 @@ fn test_simple_forward_sequence() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -87,6 +88,7 @@ fn test_reverse_complement_alignment() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -124,6 +126,7 @@ fn test_palindromic_sequence() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -155,6 +158,7 @@ fn test_inversion_between_sequences() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -196,6 +200,7 @@ fn test_complex_rearrangement() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -225,6 +230,7 @@ fn test_self_alignment_with_repeats() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -291,6 +297,7 @@ fn test_multiple_sequence_alignment() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();

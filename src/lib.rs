@@ -155,6 +155,7 @@ mod tests {
             verbose: false,
             test_mode: true,
             no_compact: false, // Enable compaction for tests
+            sparsification: "1.0".to_string(),
         };
         
         run_seqrush(args).unwrap();

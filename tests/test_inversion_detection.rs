@@ -37,6 +37,7 @@ fn test_inversion_detection_simple() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     println!("Running inversion-aware alignment...");
@@ -90,6 +91,7 @@ fn test_inversion_detection_with_context() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     println!("\nRunning inversion detection with context...");
@@ -129,6 +131,7 @@ fn test_no_inversion() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -163,6 +166,7 @@ fn test_multiple_inversions() {
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     println!("\nRunning multiple inversion detection...");

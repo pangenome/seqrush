@@ -35,6 +35,7 @@ fn test_no_untraversed_edges_in_output() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     // Run seqrush with edge validation
@@ -75,6 +76,7 @@ fn test_self_loops_in_gfa() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush(args).unwrap();
@@ -118,6 +120,7 @@ fn test_verbose_mode_shows_validation() {
         verbose: true,  // Enable verbose
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     // Capture output by running the command
@@ -169,6 +172,7 @@ fn test_complex_graph_produces_valid_gfa() {
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush(args).unwrap();
