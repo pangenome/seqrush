@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 /// Represents a node in the pangenome graph
 #[derive(Clone, Debug)]
@@ -16,6 +16,7 @@ pub struct Edge {
 }
 
 /// Graph structure for manipulation
+#[derive(Clone)]
 pub struct Graph {
     pub nodes: HashMap<usize, Node>,
     pub edges: HashSet<Edge>,
@@ -314,88 +315,58 @@ impl Graph {
     
     /// Perform topological sort on the graph
     pub fn topological_sort(&mut self) {
-        // Build adjacency lists
-        let mut in_degree: HashMap<usize, usize> = HashMap::new();
-        let mut out_edges: HashMap<usize, Vec<usize>> = HashMap::new();
+        // For now, use a simple DFS-based topological sort that works well for our use case
+        let mut visited = HashSet::new();
+        let mut stack = Vec::new();
         
-        // Initialize all nodes with 0 in-degree
-        for &node_id in self.nodes.keys() {
-            in_degree.insert(node_id, 0);
-            out_edges.insert(node_id, Vec::new());
+        // Build adjacency list
+        let mut adj_list: HashMap<usize, Vec<usize>> = HashMap::new();
+        for node_id in self.nodes.keys() {
+            adj_list.insert(*node_id, Vec::new());
         }
-        
-        // Count in-degrees and build adjacency list
         for edge in &self.edges {
-            *in_degree.get_mut(&edge.to).unwrap() += 1;
-            out_edges.get_mut(&edge.from).unwrap().push(edge.to);
+            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
         }
         
-        // Find all nodes with no incoming edges
-        let mut queue: VecDeque<usize> = VecDeque::new();
-        for (&node_id, &degree) in &in_degree {
-            if degree == 0 {
-                queue.push_back(node_id);
-            }
-        }
-        
-        // Process nodes in topological order
-        let mut rank = 0.0;
-        let mut sorted_ids = Vec::new();
-        
-        while let Some(node_id) = queue.pop_front() {
-            sorted_ids.push(node_id);
-            
-            // Assign rank
-            if let Some(node) = self.nodes.get_mut(&node_id) {
-                node.rank = rank;
-                rank += 1.0;
-            }
-            
-            // Process all neighbors
-            if let Some(neighbors) = out_edges.get(&node_id) {
+        // DFS to get topological order
+        fn dfs(node: usize, adj_list: &HashMap<usize, Vec<usize>>, 
+               visited: &mut HashSet<usize>, stack: &mut Vec<usize>) {
+            visited.insert(node);
+            if let Some(neighbors) = adj_list.get(&node) {
                 for &neighbor in neighbors {
-                    if let Some(degree) = in_degree.get_mut(&neighbor) {
-                        *degree -= 1;
-                        if *degree == 0 {
-                            queue.push_back(neighbor);
-                        }
+                    if !visited.contains(&neighbor) {
+                        dfs(neighbor, adj_list, visited, stack);
                     }
                 }
             }
+            stack.push(node);
         }
         
-        // Handle cycles by assigning remaining nodes arbitrary ranks
-        let mut remaining: Vec<usize> = self.nodes.keys()
-            .filter(|&&id| !sorted_ids.contains(&id))
-            .cloned()
-            .collect();
+        // Visit all nodes
+        let mut node_ids: Vec<_> = self.nodes.keys().cloned().collect();
+        node_ids.sort(); // Ensure deterministic order
         
-        // Sort remaining by current rank to maintain some order
-        remaining.sort_by(|&a, &b| {
-            let rank_a = self.nodes.get(&a).map(|n| n.rank).unwrap_or(0.0);
-            let rank_b = self.nodes.get(&b).map(|n| n.rank).unwrap_or(0.0);
-            rank_a.partial_cmp(&rank_b).unwrap()
-        });
-        
-        for node_id in remaining {
-            if let Some(node) = self.nodes.get_mut(&node_id) {
-                node.rank = rank;
-                rank += 1.0;
+        for node_id in node_ids {
+            if !visited.contains(&node_id) {
+                dfs(node_id, &adj_list, &mut visited, &mut stack);
             }
-            sorted_ids.push(node_id);
         }
         
-        // Renumber nodes based on topological order
-        let mut old_to_new: HashMap<usize, usize> = HashMap::new();
-        for (new_id, &old_id) in sorted_ids.iter().enumerate() {
+        // Reverse to get correct topological order
+        stack.reverse();
+        
+        // Create mapping from old to new IDs
+        let mut old_to_new = HashMap::new();
+        for (new_id, &old_id) in stack.iter().enumerate() {
             old_to_new.insert(old_id, new_id + 1); // 1-based IDs
         }
         
-        // Create new nodes map with updated IDs
+        // Update nodes
         let mut new_nodes = HashMap::new();
         for (old_id, mut node) in self.nodes.drain() {
             if let Some(&new_id) = old_to_new.get(&old_id) {
                 node.id = new_id;
+                node.rank = (new_id - 1) as f64;
                 new_nodes.insert(new_id, node);
             }
         }
