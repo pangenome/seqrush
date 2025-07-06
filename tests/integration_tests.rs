@@ -60,6 +60,19 @@ fn load_sequences_missing_file() {
 }
 
 #[test]
+fn load_sequences_large_input() {
+    let path = temp_file("large");
+    let mut f = File::create(&path).unwrap();
+    for i in 0..1000 {
+        writeln!(f, ">{}\nACGTACGTACGTACGTACGTACGTACGTACGT", i).unwrap();
+    }
+    f.sync_all().unwrap();
+    let seqs = load_sequences(path.to_str().unwrap()).unwrap();
+    assert_eq!(seqs.len(), 1000);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn run_seqrush_missing_input() {
     let out_path = temp_file("out_missing");
     let args = Args {
