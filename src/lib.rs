@@ -89,4 +89,3 @@ pub fn run_seqrush(args: Args) -> io::Result<()> {
 
     Ok(())
 }
-
