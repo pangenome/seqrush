@@ -95,6 +95,15 @@ fn load_sequences_missing_file() {
 }
 
 #[test]
+fn load_sequences_malformed_first_line() {
+    let mut file = temp_file();
+    writeln!(file, "ACGT\n>id\nTTTT").unwrap();
+    file.as_file_mut().sync_all().unwrap();
+    let result = load_sequences(file.path().to_str().unwrap());
+    assert!(result.is_err());
+}
+
+#[test]
 fn load_sequences_large_input() {
     let mut file = temp_file();
     for i in 0..1000 {
