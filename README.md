@@ -58,6 +58,12 @@ cd seqrush
 cargo build --release
 ```
 
+To use the CLI flags, build the binary with the `cli` feature enabled:
+
+```bash
+cargo build --release --features cli
+```
+
 The binary will be available at `target/release/seqrush`.
 
 ## Usage
