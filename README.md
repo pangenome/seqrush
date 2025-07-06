@@ -68,6 +68,8 @@ The binary will be available at `target/release/seqrush`.
 seqrush -s sequences.fasta -o graph.gfa
 ```
 
+Enable the optional `cli` feature to use command-line flags.
+
 ### Advanced Options
 
 ```bash
