@@ -1,5 +1,12 @@
 pub mod seqrush;
 pub mod graph_ops;
+pub mod bidirected_graph;
+pub mod bidirected_ops;
+pub mod pos;
+pub mod seqrush_bidirected;
+pub mod seqrush_bidirected_simplified;
+pub mod cigar_analysis;
+pub mod inversion_aware_seqrush;
 
 #[cfg(test)]
 mod compaction_tests;
