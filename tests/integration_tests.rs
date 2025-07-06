@@ -41,3 +41,53 @@ fn run_seqrush_writes_output() {
     let content = fs::read_to_string(out_path).unwrap();
     assert!(content.starts_with("H\tVN:Z:1.0"));
 }
+#[test]
+fn load_sequences_empty_input() {
+    let path = temp_file("empty");
+    File::create(&path).unwrap();
+    let seqs = load_sequences(path.to_str().unwrap()).unwrap();
+    assert!(seqs.is_empty());
+}
+
+#[test]
+fn load_sequences_missing_file() {
+    let path = temp_file("missing");
+    let result = load_sequences(path.to_str().unwrap());
+    assert!(result.is_err());
+}
+
+#[test]
+fn run_seqrush_missing_input() {
+    let out_path = temp_file("out_missing");
+    let args = Args {
+        sequences: temp_file("noexist").to_str().unwrap().to_string(),
+        output: out_path.to_str().unwrap().to_string(),
+        threads: 1,
+        min_match_length: 1,
+    };
+    let result = run_seqrush(args);
+    assert!(result.is_err());
+}
+
+use std::process::Command;
+
+#[test]
+fn cli_no_arguments() {
+    let exe = env!("CARGO_BIN_EXE_seqrush");
+    let output = Command::new(exe).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("input FASTA required"));
+}
+
+#[test]
+fn cli_missing_output() {
+    let exe = env!("CARGO_BIN_EXE_seqrush");
+    let output = Command::new(exe)
+        .arg("somefile")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("output file required"));
+}
