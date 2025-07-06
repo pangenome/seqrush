@@ -17,9 +17,11 @@ path = "src/lib.rs"
 name = "seqrush"
 path = "src/main.rs"
 
+
 [dependencies]
+clap = { version = "4", features = ["derive"], optional = true }
 
 [features]
-cli = []
+cli = ["clap"]
 
 [dev-dependencies]

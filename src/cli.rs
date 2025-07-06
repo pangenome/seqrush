@@ -1,43 +1,38 @@
 #[cfg(feature = "cli")]
+use clap::Parser;
+#[cfg(feature = "cli")]
 use seqrush::Args;
 
 #[cfg(feature = "cli")]
-/// Parse command line arguments into `Args`.
-pub fn parse() -> Args {
-    let mut sequences = None;
-    let mut output = None;
-    let mut threads = 1_usize;
-    let mut min_match_length = 15_usize;
+#[derive(Parser)]
+#[command(name = "seqrush", about = "Build pangenome graphs")] 
+struct CliArgs {
+    /// Input FASTA file
+    #[arg(short = 's', long)]
+    sequences: String,
 
-    let mut iter = std::env::args().skip(1);
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "-s" | "--sequences" => sequences = iter.next(),
-            "-o" | "--output" => output = iter.next(),
-            "-t" | "--threads" => {
-                if let Some(t) = iter.next() {
-                    if let Ok(v) = t.parse() {
-                        threads = v;
-                    }
-                }
-            }
-            "-k" | "--min-match-length" => {
-                if let Some(m) = iter.next() {
-                    if let Ok(v) = m.parse() {
-                        min_match_length = v;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let sequences = sequences.expect("input FASTA required");
-    let output = output.expect("output file required");
+    /// Output GFA file
+    #[arg(short = 'o', long)]
+    output: String,
+
+    /// Number of worker threads
+    #[arg(short = 't', long, default_value_t = 1)]
+    threads: usize,
+
+    /// Minimum match length
+    #[arg(short = 'k', long = "min-match-length", default_value_t = 15)]
+    min_match_length: usize,
+}
+
+#[cfg(feature = "cli")]
+/// Parse command line arguments into `Args` using clap.
+pub fn parse() -> Args {
+    let cli = CliArgs::parse();
     Args {
-        sequences,
-        output,
-        threads,
-        min_match_length,
+        sequences: cli.sequences,
+        output: cli.output,
+        threads: cli.threads,
+        min_match_length: cli.min_match_length,
     }
 }
 
