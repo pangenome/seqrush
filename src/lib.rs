@@ -1,6 +1,12 @@
 use std::fs::File;
 use std::io::{self, BufRead, Write};
 
+/// Options parsed from the command line.
+///
+/// - `sequences`: input FASTA path
+/// - `output`: output GFA path
+/// - `threads`: worker thread count
+/// - `min_match_length`: minimum match length
 #[derive(Debug, Clone)]
 pub struct Args {
     /// Path to input FASTA file
@@ -13,6 +19,10 @@ pub struct Args {
     pub min_match_length: usize,
 }
 
+/// A FASTA record.
+///
+/// - `id`: sequence identifier
+/// - `data`: raw bytes of the sequence
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FastaSequence {
     pub id: String,
