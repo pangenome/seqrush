@@ -167,8 +167,8 @@ cargo test
 # Run with verbose output
 cargo test -- --nocapture
 
-# Run specific test
-cargo test test_performance_scaling
+# Run a specific test
+cargo test run_seqrush_writes_output
 ```
 
 ### Building Documentation
