@@ -41,3 +41,28 @@ fn run_seqrush_writes_output() {
     let content = fs::read_to_string(out_path).unwrap();
     assert!(content.starts_with("H\tVN:Z:1.0"));
 }
+
+#[cfg(feature = "cli")]
+#[test]
+fn cli_parses_flags() {
+    use std::process::Command;
+    let in_path = temp_file("cli_in");
+    let mut f = File::create(&in_path).unwrap();
+    writeln!(f, ">z\nAAAA").unwrap();
+    f.sync_all().unwrap();
+    let out_path = temp_file("cli_out");
+    let status = Command::new(env!("CARGO_BIN_EXE_seqrush"))
+        .args([
+            "-s",
+            in_path.to_str().unwrap(),
+            "-o",
+            out_path.to_str().unwrap(),
+            "-t",
+            "2",
+            "-k",
+            "5",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
