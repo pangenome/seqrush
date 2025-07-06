@@ -3,16 +3,16 @@
 ![CI](https://github.com/KristopherKubicki/seqrush/actions/workflows/ci.yml/badge.svg)
 [![codecov](https://codecov.io/gh/KristopherKubicki/seqrush/branch/main/graph/badge.svg)](https://codecov.io/gh/KristopherKubicki/seqrush)
 
-A high-performance, parallel pangenome graph construction tool that implements a simplified seqwish-like algorithm using lock-free union-find data structures.
+SeqRush is a prototype pangenome graph construction tool inspired by seqwish. Planned features include lock-free union-find structures and WFA2-based alignments.
 
 ## Overview
 
 SeqRush builds pangenome graphs by:
-1. Performing all-vs-all pairwise alignments using WFA2 (Wavefront Alignment)
-2. Using a lock-free union-find data structure to merge matching positions
-3. Constructing a graph where sequences are embedded as paths
+1. *Planned*: perform all-vs-all pairwise alignments using WFA2 (Wavefront Alignment)
+2. *Planned*: use a lock-free union-find data structure to merge matching positions
+3. Construct a graph where sequences are embedded as paths
 
-The key innovation is the use of UFRush (lock-free union-find) to enable true parallel graph construction without synchronization overhead.
+The design aims to leverage UFRush (lock-free union-find) for true parallel graph construction once implemented.
 
 ## Quick Start
 
@@ -36,9 +36,9 @@ cat test.gfa
 
 ## Features
 
-- **Lock-free Parallel Processing**: Uses UFRush for wait-free union-find operations
-- **Memory Efficient**: O(s) memory alignment using WFA2's UltraLow mode
-- **All-vs-All Alignment**: Comprehensive pairwise alignment of all input sequences
+- *Planned*: **Lock-free Parallel Processing** via UFRush
+- *Planned*: **Memory Efficient** alignment using WFA2's UltraLow mode
+- *Planned*: **All-vs-All Alignment** of all input sequences
 - **Configurable Parameters**: Alignment scoring, minimum match length
 - **Standard GFA Output**: Compatible with tools like `odgi` and `vg`
 - **Path Integrity**: Sequences are perfectly reconstructible from the graph
@@ -102,16 +102,16 @@ odgi stats -i pangenome.og -S
 ### Core Algorithm
 
 1. **Load Sequences**: Read FASTA file and assign global positions to each base
-2. **Initialize Union-Find**: Create a UFRush instance with one element per base
-3. **Pairwise Alignment**: Align all sequence pairs using WFA2
-4. **Process Matches**: For each alignment, unite positions with matches ≥ min_match_length
-5. **Build Graph**: Walk sequences through union-find to identify nodes and edges
+2. *Planned*: initialize a UFRush instance with one element per base
+3. *Planned*: align all sequence pairs using WFA2
+4. *Planned*: process matches ≥ `min_match_length` and unite positions
+5. **Build Graph**: Walk sequences to identify nodes and edges
 
 ### Key Implementation Details
 
-- **CIGAR Processing**: Handles WFA2's fine-grained CIGAR output (individual M operations)
-- **Match Accumulation**: Tracks consecutive matches across multiple CIGAR operations
-- **Base Verification**: Confirms actual base matches since 'M' can represent match or mismatch
+- *Planned*: **CIGAR Processing** for WFA2's fine-grained output
+- *Planned*: **Match Accumulation** across CIGAR operations
+- *Planned*: **Base Verification** since 'M' may represent mismatch
 - **Path Construction**: Each sequence becomes a path through deduplicated nodes
 
 ### Performance Characteristics
@@ -160,35 +160,17 @@ cargo test test_performance_scaling
 cargo doc --open
 ```
 
-### Debugging Tools
-
-SeqRush includes several debugging utilities:
-
-```bash
-# Debug union-find operations
-cargo run --bin debug_union_find
-
-# Debug alignment processing
-cargo run --bin debug_alignment
-
-# Debug CIGAR string parsing
-cargo run --bin debug_cigar
-
-# Test match run tracking
-cargo run --bin test_match_runs
-```
-
 ### Project Structure
 
 ```
 seqrush/
 ├── src/
 │   ├── lib.rs          # Library interface
-│   ├── main.rs         # CLI binary
-│   └── seqrush.rs      # Core implementation
+│   └── main.rs         # CLI binary
 ├── tests/
 │   └── integration_tests.rs
-└── Cargo.toml
+├── Cargo.toml
+└── README.md
 ```
 
 ## Limitations
@@ -222,3 +204,10 @@ SeqRush is inspired by:
 - [seqwish](https://github.com/ekg/seqwish) by Erik Garrison
 - [WFA2-lib](https://github.com/smarco/WFA2-lib) by Santiago Marco-Sola
 - [UFRush](https://crates.io/crates/uf_rush) lock-free union-find implementation
+
+## Future Work
+
+- Integrate WFA2 for efficient pairwise alignments
+- Implement lock-free union-find (UFRush) for parallel graph construction
+- Support streaming graph output for large datasets
+- Extend sequence alphabet beyond DNA
