@@ -27,11 +27,19 @@ ATCGATGGATCGATCG
 ATCGATCGATCGATGG
 EOF
 
-# Build the pangenome graph
+# Build the project with CLI support
+cargo build --release --features cli
+# Build the pangenome graph using flags
 seqrush -s test.fasta -o test.gfa
 
 # View the output
 cat test.gfa
+```
+
+If you build without `--features cli`, use positional arguments instead:
+
+```bash
+seqrush test.fasta test.gfa
 ```
 
 ## Features
