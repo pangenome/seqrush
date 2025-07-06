@@ -1,7 +1,7 @@
 use seqrush::{load_sequences, run_seqrush, Args};
 use std::fs::{self, File};
 use std::io::Write;
-use tempfile::NamedTempFile;
+use tempfile::{tempdir, NamedTempFile};
 
 fn temp_file() -> NamedTempFile {
     NamedTempFile::new().unwrap()
@@ -126,6 +126,27 @@ fn run_seqrush_missing_input() {
     if out_path.exists() {
         fs::remove_file(out_path).unwrap();
     }
+}
+
+#[test]
+fn run_seqrush_nonexistent_output_directory() {
+    let mut fasta_file = temp_file();
+    writeln!(fasta_file, ">id\nACGT").unwrap();
+    fasta_file.as_file_mut().sync_all().unwrap();
+
+    let dir = tempdir().unwrap();
+    let output_path = dir.path().join("out.gfa");
+    drop(dir);
+
+    let args = Args {
+        sequences: fasta_file.path().to_str().unwrap().to_string(),
+        output: output_path.to_str().unwrap().to_string(),
+        threads: 1,
+        min_match_length: 1,
+    };
+    let result = run_seqrush(args);
+    assert!(result.is_err());
+    assert!(!output_path.exists());
 }
 
 use std::process::Command;
