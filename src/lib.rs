@@ -20,6 +20,14 @@ pub mod seqrush {
         pub data: Vec<u8>,
     }
 
+    /// Read sequences from a FASTA file.
+    ///
+    /// The `path` argument should point to a plaintext FASTA file. Each record
+    /// is parsed into a [`FastaSequence`] with its identifier and raw bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if the file cannot be read.
     pub fn load_sequences(path: &str) -> io::Result<Vec<FastaSequence>> {
         let contents = fs::read_to_string(path)?;
         let mut sequences = Vec::new();
@@ -48,6 +56,16 @@ pub mod seqrush {
         Ok(sequences)
     }
 
+    /// Generate a minimal GFA representation for the given sequences.
+    ///
+    /// The provided [`Args`] struct supplies the input FASTA path and the
+    /// destination for the GFA output. Sequences are loaded with
+    /// [`load_sequences`] and written as segments and paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if reading the FASTA file or writing the GFA
+    /// file fails.
     pub fn run_seqrush(args: Args) -> io::Result<()> {
         let sequences = load_sequences(&args.sequences)?;
         let mut file = File::create(&args.output)?;
