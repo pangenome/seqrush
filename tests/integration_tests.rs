@@ -167,3 +167,34 @@ fn cli_parses_flags() {
         .unwrap();
     assert!(status.success());
 }
+
+#[test]
+fn run_seqrush_single_sequence_no_links() {
+    let fasta_path = temp_file("single");
+    let mut f = File::create(&fasta_path).unwrap();
+    writeln!(f, ">id\nACGT").unwrap();
+    f.sync_all().unwrap();
+
+    let gfa_path = temp_file("single_out");
+    let args = Args {
+        sequences: fasta_path.to_str().unwrap().to_string(),
+        output: gfa_path.to_str().unwrap().to_string(),
+        threads: 1,
+        min_match_length: 1,
+    };
+    run_seqrush(args).unwrap();
+
+    let content = fs::read_to_string(&gfa_path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines[0], "H\tVN:Z:1.0");
+    let s_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with("S\t")).collect();
+    assert_eq!(s_lines.len(), 1);
+    assert_eq!(s_lines[0], &"S\tid\tACGT");
+    let p_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with("P\t")).collect();
+    assert_eq!(p_lines.len(), 1);
+    assert_eq!(p_lines[0], &"P\tp1\tid\t*");
+    assert!(lines.iter().all(|l| !l.starts_with("L\t")));
+
+    fs::remove_file(&fasta_path).unwrap();
+    fs::remove_file(&gfa_path).unwrap();
+}
