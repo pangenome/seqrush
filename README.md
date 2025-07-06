@@ -82,7 +82,7 @@ Enable the optional `cli` feature to use command-line flags.
 seqrush \
   -s sequences.fasta \        # Input FASTA file
   -o graph.gfa \              # Output GFA file
-  -t 8 \                      # Number of threads (default: 4)
+  -t 8 \                      # Number of threads (default: 1)
   -k 15 \                     # Minimum match length (default: 15)
   --match-score 0 \           # WFA match score (default: 0)
   --mismatch-penalty 5 \      # WFA mismatch penalty (default: 5)
