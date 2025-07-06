@@ -12,6 +12,7 @@ use lib_wfa2::affine_wavefront::{AffineWavefronts, MemoryMode, AlignmentStatus};
 pub struct SeqRushBidirected {
     sequences: Vec<Sequence>,
     union_find: UFRush,
+    #[allow(dead_code)]
     total_positions: usize,
 }
 
@@ -36,6 +37,7 @@ impl SeqRushBidirected {
     }
     
     /// Convert a union-find index back to an oriented position
+    #[allow(dead_code)]
     fn uf_index_to_pos(&self, index: usize) -> Pos {
         let offset = index / 2;
         let is_reverse = (index % 2) == 1;

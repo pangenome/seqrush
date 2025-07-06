@@ -24,6 +24,7 @@ struct Alignment {
     seq2_end: usize,
     seq2_is_rc: bool,
     cigar: String,
+    #[allow(dead_code)]
     score: i32,
 }
 

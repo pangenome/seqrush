@@ -36,6 +36,7 @@ fn test_inversion_detection_simple() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     println!("Running inversion-aware alignment...");
@@ -88,6 +89,7 @@ fn test_inversion_detection_with_context() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     println!("\nRunning inversion detection with context...");
@@ -126,6 +128,7 @@ fn test_no_inversion() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -159,6 +162,7 @@ fn test_multiple_inversions() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     println!("\nRunning multiple inversion detection...");

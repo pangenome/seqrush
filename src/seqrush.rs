@@ -42,6 +42,10 @@ pub struct Args {
     /// Test mode - disable bidirectional alignment
     #[arg(long, hide = true)]
     pub test_mode: bool,
+    
+    /// Enable node compaction (experimental - may cause issues with repeated sequences)
+    #[arg(long, hide = true)]
+    pub enable_compaction: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -164,7 +168,7 @@ impl SeqRush {
         self.align_and_unite(args);
         
         // Phase 2: Write graph by walking sequences through union-find
-        self.write_gfa(&args.output, args.verbose, args.test_mode).expect("Failed to write GFA");
+        self.write_gfa(args).expect("Failed to write GFA");
     }
     
     pub fn align_and_unite(&self, args: &Args) {
@@ -409,7 +413,10 @@ impl SeqRush {
         }
     }
     
-    fn write_gfa(&self, output_path: &str, verbose: bool, test_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
+    fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+        let output_path = &args.output;
+        let verbose = args.verbose;
+        let test_mode = args.test_mode;
         // Build initial graph from union-find
         let mut graph = self.build_initial_graph(verbose)?;
         
@@ -436,26 +443,33 @@ impl SeqRush {
             }
         }
         
-        // Perform node compaction
-        let compacted = graph.compact_nodes();
-        if verbose {
-            println!("Compacted {} nodes", compacted);
-            println!("After compaction: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
+        // Perform node compaction if enabled
+        if args.enable_compaction {
+            let compacted = graph.compact_nodes();
+            if verbose {
+                println!("Compacted {} nodes", compacted);
+                println!("After compaction: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
+            }
+            
+            // Verify paths after compaction (skip in test mode for synthetic sequences)
+            if !test_mode {
+                if verbose {
+                    println!("Verifying paths after compaction...");
+                }
+                if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
+                    eprintln!("Path verification failed after compaction:");
+                    for error in &errors {
+                        eprintln!("  - {}", error);
+                    }
+                    return Err(format!("Path verification failed after compaction: {} errors", errors.len()).into());
+                }
+            }
+        } else {
+            if verbose {
+                println!("Skipping node compaction to preserve graph structure");
+            }
         }
         
-        // Verify paths after compaction (skip in test mode for synthetic sequences)
-        if !test_mode {
-            if verbose {
-                println!("Verifying paths after compaction...");
-            }
-            if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
-                eprintln!("Path verification failed after compaction:");
-                for error in &errors {
-                    eprintln!("  - {}", error);
-                }
-                return Err(format!("Path verification failed after compaction: {} errors", errors.len()).into());
-            }
-        }
         
         // Perform topological sort
         graph.topological_sort();

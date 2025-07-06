@@ -90,6 +90,7 @@ fn test_inverted_repeats() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -131,6 +132,7 @@ fn test_complex_cnv_repeats() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -138,7 +140,7 @@ fn test_complex_cnv_repeats() {
     let gfa_content = fs::read_to_string(output.path()).unwrap();
     
     // Should create a graph that represents the tandem repeat structure
-    let nodes: Vec<&str> = gfa_content.lines()
+    let _nodes: Vec<&str> = gfa_content.lines()
         .filter(|l| l.starts_with('S'))
         .collect();
     
@@ -182,6 +184,7 @@ fn test_y_shaped_breakpoint() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -225,6 +228,7 @@ fn test_nested_inversions() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -274,6 +278,7 @@ fn test_random_rearrangements() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -317,6 +322,7 @@ fn test_tandem_repeat_polymorphism() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -367,6 +373,7 @@ fn test_complex_nested_variations() {
         max_divergence: Some(0.2),
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -416,6 +423,7 @@ fn test_interspersed_repeats_with_inversions() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -473,6 +481,7 @@ fn test_breakpoint_resolution() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_inversion_aware_seqrush(args).unwrap();

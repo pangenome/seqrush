@@ -74,6 +74,7 @@ fn test_base_case_empty() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -112,6 +113,7 @@ fn test_base_case_single_base() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -200,6 +202,7 @@ fn test_identical_sequences_share_nodes() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -242,6 +245,7 @@ fn test_inductive_sequence_extension() {
             max_divergence: None,
             verbose: false,
             test_mode: false,
+            enable_compaction: false,
         };
         
         run_seqrush_bidirected_simple(args).unwrap();
@@ -326,6 +330,7 @@ fn test_path_reconstruction_correctness() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -374,6 +379,7 @@ fn test_edge_connectivity() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -415,6 +421,7 @@ fn test_palindromic_sequences() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -448,6 +455,7 @@ fn test_union_find_with_matches() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -491,6 +499,7 @@ fn test_large_sequences() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -524,6 +533,7 @@ fn test_transitivity_of_matches() {
         max_divergence: None,
         verbose: false,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();

@@ -1,5 +1,4 @@
 use seqrush::bidirected_graph::*;
-use seqrush::bidirected_ops::*;
 use seqrush::pos::*;
 use seqrush::seqrush_bidirected_simplified::*;
 use seqrush::seqrush::Args;
@@ -53,12 +52,13 @@ fn test_simple_forward_sequence() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
     let gfa_content = fs::read_to_string(output.path()).unwrap();
-    let (nodes, edges, paths) = parse_gfa_for_orientations(&gfa_content);
+    let (nodes, _edges, paths) = parse_gfa_for_orientations(&gfa_content);
     
     // Should have 4 nodes
     assert_eq!(nodes.len(), 4);
@@ -86,6 +86,7 @@ fn test_reverse_complement_alignment() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -122,6 +123,7 @@ fn test_palindromic_sequence() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -152,6 +154,7 @@ fn test_inversion_between_sequences() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -159,7 +162,7 @@ fn test_inversion_between_sequences() {
     let gfa_content = fs::read_to_string(output.path()).unwrap();
     println!("Inversion test GFA:\n{}", gfa_content);
     
-    let (nodes, edges, paths) = parse_gfa_for_orientations(&gfa_content);
+    let (_nodes, _edges, paths) = parse_gfa_for_orientations(&gfa_content);
     
     // Should have shared nodes for the common parts
     // Note: The simple bidirected implementation doesn't detect partial inversions within sequences
@@ -192,6 +195,7 @@ fn test_complex_rearrangement() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -220,6 +224,7 @@ fn test_self_alignment_with_repeats() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -285,6 +290,7 @@ fn test_multiple_sequence_alignment() {
         max_divergence: None,
         verbose: true,
         test_mode: false,
+            enable_compaction: false,
     };
     
     run_seqrush_bidirected_simple(args).unwrap();

@@ -44,6 +44,7 @@ fn test_performance_scaling() {
             max_divergence: None,
             verbose: false,
             test_mode: true,
+            enable_compaction: false,
         };
         
         let start = Instant::now();
@@ -116,6 +117,7 @@ fn test_real_world_example() {
         max_divergence: None,
         verbose: true,
         test_mode: true,
+            enable_compaction: false,
     };
     
     run_seqrush(args).unwrap();
@@ -147,6 +149,7 @@ fn test_command_line_interface() {
         max_divergence: None,
         verbose: false,
         test_mode: true,
+            enable_compaction: false,
     };
     
     run_seqrush(args).unwrap();
@@ -190,6 +193,7 @@ fn test_parallel_consistency() {
             max_divergence: None,
             verbose: false,
             test_mode: true,
+            enable_compaction: false,
         };
         
         run_seqrush(args).unwrap();

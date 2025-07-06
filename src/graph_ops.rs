@@ -39,6 +39,7 @@ impl Graph {
         // Find all linear chains (simple components)
         let chains = self.find_linear_chains();
         
+        
         // Add a safety check to prevent infinite loops
         let max_iterations = self.nodes.len();
         let mut iterations = 0;
@@ -91,6 +92,12 @@ impl Graph {
         for &node_id in self.nodes.keys() {
             if visited.contains(&node_id) {
                 continue;
+            }
+            
+            // Check if node has a self-loop
+            let has_self_loop = self.edges.contains(&Edge { from: node_id, to: node_id });
+            if has_self_loop {
+                continue; // Skip nodes with self-loops for chain compaction
             }
             
             let in_degree = backward_edges.get(&node_id).map(|v| v.len()).unwrap_or(0);
@@ -182,15 +189,33 @@ impl Graph {
         let new_id = chain[0]; // Use first node's ID
         let mut new_sequence = Vec::new();
         let mut total_rank = 0.0;
+        let mut seen_sequences = HashSet::new();
         
+        // Only concatenate unique sequences to avoid duplicating when nodes represent the same character
         for &node_id in chain {
             if let Some(node) = self.nodes.get(&node_id) {
-                new_sequence.extend_from_slice(&node.sequence);
+                // Check if this is a truly different sequence or just a repeat
+                let seq_hash = node.sequence.clone();
+                if chain.len() > 1 && !seen_sequences.contains(&seq_hash) {
+                    new_sequence.extend_from_slice(&node.sequence);
+                    seen_sequences.insert(seq_hash);
+                } else if chain.len() == 1 {
+                    // Single node "chain" - keep as is
+                    new_sequence = node.sequence.clone();
+                }
                 total_rank += node.rank;
             }
         }
         
+        // If all nodes in chain had the same sequence, keep just one copy
+        if new_sequence.is_empty() && chain.len() > 0 {
+            if let Some(node) = self.nodes.get(&chain[0]) {
+                new_sequence = node.sequence.clone();
+            }
+        }
+        
         let avg_rank = total_rank / chain.len() as f64;
+        
         
         // Remove old nodes except the first one
         for &node_id in &chain[1..] {
@@ -220,55 +245,63 @@ impl Graph {
                 to = new_id;
             }
             
-            // Always include edges, including self-loops (they can occur when consecutive positions are united)
+            // Skip internal chain edges (edges between consecutive nodes in the chain)
+            // but keep all other edges including self-loops
+            let mut is_internal_chain_edge = false;
+            for i in 0..chain.len() - 1 {
+                if edge.from == chain[i] && edge.to == chain[i + 1] {
+                    is_internal_chain_edge = true;
+                    break;
+                }
+            }
+            
+            if is_internal_chain_edge {
+                continue; // Skip internal chain edges
+            }
+            
             new_edges.insert(Edge { from, to });
-        }
-        
-        // Remove internal edges of the chain
-        for i in 0..chain.len() - 1 {
-            new_edges.remove(&Edge { from: chain[i], to: chain[i + 1] });
         }
         
         self.edges = new_edges;
         
-        // Update paths
-        for (_, path) in &mut self.paths {
+        // Update paths - simpler approach that preserves all occurrences
+        for (path_name, path) in &mut self.paths {
             let mut new_path = Vec::new();
-            let mut i = 0;
             
-            while i < path.len() {
-                let node_id = path[i];
-                
-                if node_id == chain[0] {
-                    // Check if this starts the chain in the path
-                    let mut matches_chain = true;
-                    for (j, &chain_node) in chain.iter().enumerate() {
-                        if i + j >= path.len() || path[i + j] != chain_node {
-                            matches_chain = false;
-                            break;
-                        }
-                    }
-                    
-                    if matches_chain {
-                        // Replace the chain with the merged node
-                        new_path.push(new_id);
-                        i += chain.len();
-                    } else {
-                        new_path.push(new_id);
-                        i += 1;
-                    }
-                } else if chain.contains(&node_id) {
-                    // This node was part of a chain but not at the expected position
-                    // This shouldn't happen in a well-formed path
+            for &node_id in path.iter() {
+                if chain.contains(&node_id) {
+                    // Any node in the chain gets replaced with the new merged node
                     new_path.push(new_id);
-                    i += 1;
                 } else {
                     new_path.push(node_id);
-                    i += 1;
                 }
             }
             
+            // Debug: Check if we're creating issues
+            let old_len = path.len();
+            let new_len = new_path.len();
+            if old_len != new_len {
+                eprintln!("WARNING: Path {} length changed during compaction: {} -> {}", 
+                         path_name, old_len, new_len);
+            }
+            
             *path = new_path;
+        }
+        
+        // After updating paths, rebuild edges from the paths to ensure all necessary edges exist
+        // This is important for self-loops that arise from consecutive visits to the same node
+        let mut edges_from_paths = HashSet::new();
+        for (_, path) in &self.paths {
+            for window in path.windows(2) {
+                if let [from, to] = window {
+                    edges_from_paths.insert(Edge { from: *from, to: *to });
+                }
+            }
+        }
+        
+        // Add any edges from paths that might be missing
+        for edge in edges_from_paths {
+            self.edges.insert(edge);
         }
     }
     
@@ -584,6 +617,96 @@ impl Graph {
         components
     }
     
+    /// Verify edge traversal - all edges should be used by paths
+    pub fn verify_edge_traversal(&self, verbose: bool) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        
+        // Collect all edges traversed by paths
+        let mut traversed_edges = HashSet::new();
+        let mut self_loop_traversals = 0;
+        for (_, path) in &self.paths {
+            for window in path.windows(2) {
+                let edge = Edge { from: window[0], to: window[1] };
+                if edge.from == edge.to {
+                    self_loop_traversals += 1;
+                }
+                traversed_edges.insert(edge);
+            }
+        }
+        
+        if verbose && self_loop_traversals > 0 {
+            println!("  Found {} self-loop traversals in paths", self_loop_traversals);
+        }
+        
+        // Check for untraversed edges
+        let mut untraversed_edges = Vec::new();
+        let mut total_self_loops = 0;
+        for edge in &self.edges {
+            if edge.from == edge.to {
+                total_self_loops += 1;
+            }
+            if !traversed_edges.contains(edge) {
+                untraversed_edges.push(edge);
+            }
+        }
+        
+        if verbose {
+            println!("  Total self-loops in graph: {}", total_self_loops);
+        }
+        
+        if !untraversed_edges.is_empty() {
+            errors.push(format!(
+                "Found {} edges not traversed by any path",
+                untraversed_edges.len()
+            ));
+            if verbose {
+                for edge in untraversed_edges.iter().take(10) {
+                    println!("  Untraversed edge: {} -> {}", edge.from, edge.to);
+                }
+                if untraversed_edges.len() > 10 {
+                    println!("  ... and {} more", untraversed_edges.len() - 10);
+                }
+            }
+        }
+        
+        // Check that all path edges exist in the graph
+        let mut missing_edges = Vec::new();
+        for (path_name, path) in &self.paths {
+            for window in path.windows(2) {
+                let edge = Edge { from: window[0], to: window[1] };
+                if !self.edges.contains(&edge) {
+                    missing_edges.push((path_name.clone(), edge));
+                }
+            }
+        }
+        
+        if !missing_edges.is_empty() {
+            errors.push(format!(
+                "Found {} edges in paths that don't exist in the graph",
+                missing_edges.len()
+            ));
+            if verbose {
+                for (path_name, edge) in missing_edges.iter().take(10) {
+                    println!("  Path '{}' uses non-existent edge: {} -> {}", 
+                             path_name, edge.from, edge.to);
+                }
+                if missing_edges.len() > 10 {
+                    println!("  ... and {} more", missing_edges.len() - 10);
+                }
+            }
+        }
+        
+        if errors.is_empty() {
+            if verbose {
+                println!("✓ Edge traversal verification passed: all {} edges are traversed by paths", 
+                         self.edges.len());
+            }
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     /// Comprehensive verification of graph and paths
     pub fn comprehensive_verify(&self, original_sequences: Option<&[(String, Vec<u8>)]>, verbose: bool) -> Result<(), Vec<String>> {
         let mut all_errors = Vec::new();
@@ -602,7 +725,12 @@ impl Graph {
             all_errors.append(&mut errors);
         }
         
-        // 3. Verify path integrity against original sequences if provided
+        // 3. Verify edge traversal
+        if let Err(mut errors) = self.verify_edge_traversal(verbose) {
+            all_errors.append(&mut errors);
+        }
+        
+        // 4. Verify path integrity against original sequences if provided
         if let Some(original_seqs) = original_sequences {
             for (seq_name, seq_data) in original_seqs {
                 if let Some((_, path)) = self.paths.iter().find(|(name, _)| name == seq_name) {
