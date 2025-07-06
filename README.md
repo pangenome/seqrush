@@ -190,13 +190,13 @@ If you use SeqRush in your research, please cite:
 
 ```
 SeqRush: Lock-free parallel pangenome graph construction
-[Your Name], 2024
+Kristopher Kubicki, 2025
 https://github.com/KristopherKubicki/seqrush
 ```
 
 ## License
 
-[License information here]
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
