@@ -714,6 +714,59 @@ impl Graph {
         }
     }
 
+    /// Validate that the graph is valid for GFA output
+    pub fn validate_gfa_format(&self, verbose: bool) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        
+        // Check 1: All nodes have IDs
+        for (id, node) in &self.nodes {
+            if *id != node.id {
+                errors.push(format!("Node ID mismatch: map key {} != node.id {}", id, node.id));
+            }
+            if node.sequence.is_empty() {
+                errors.push(format!("Node {} has empty sequence", id));
+            }
+        }
+        
+        // Check 2: All edges reference existing nodes
+        for edge in &self.edges {
+            if !self.nodes.contains_key(&edge.from) {
+                errors.push(format!("Edge references non-existent node: {}", edge.from));
+            }
+            if !self.nodes.contains_key(&edge.to) {
+                errors.push(format!("Edge references non-existent node: {}", edge.to));
+            }
+        }
+        
+        // Check 3: All paths reference existing nodes and have valid edges
+        for (path_name, path) in &self.paths {
+            // Check all nodes exist
+            for &node_id in path {
+                if !self.nodes.contains_key(&node_id) {
+                    errors.push(format!("Path '{}' references non-existent node: {}", path_name, node_id));
+                }
+            }
+            
+            // Check all consecutive pairs have edges
+            for window in path.windows(2) {
+                let edge = Edge { from: window[0], to: window[1] };
+                if !self.edges.contains(&edge) {
+                    errors.push(format!("Path '{}' uses non-existent edge: {} -> {}", 
+                                      path_name, edge.from, edge.to));
+                }
+            }
+        }
+        
+        if errors.is_empty() {
+            if verbose {
+                println!("✓ GFA format validation passed");
+            }
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    
     /// Comprehensive verification of graph and paths
     pub fn comprehensive_verify(&self, original_sequences: Option<&[(String, Vec<u8>)]>, verbose: bool) -> Result<(), Vec<String>> {
         let mut all_errors = Vec::new();
