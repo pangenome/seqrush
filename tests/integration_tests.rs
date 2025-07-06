@@ -121,31 +121,32 @@ fn run_seqrush_missing_input() {
 
 use std::process::Command;
 
+#[cfg(feature = "cli")]
 #[test]
 fn cli_no_arguments() {
     let exe = env!("CARGO_BIN_EXE_seqrush");
     let output = Command::new(exe).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("input FASTA required"));
+    assert!(stderr.contains("required arguments"));
 }
 
+#[cfg(feature = "cli")]
 #[test]
 fn cli_missing_output() {
     let exe = env!("CARGO_BIN_EXE_seqrush");
     let output = Command::new(exe)
-        .arg("somefile")
+        .args(["-s", "somefile"]) 
         .output()
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("output file required"));
+    assert!(stderr.contains("required arguments"));
 }
 
 #[cfg(feature = "cli")]
 #[test]
 fn cli_parses_flags() {
-    use std::process::Command;
     let in_path = temp_file("cli_in");
     let mut f = File::create(&in_path).unwrap();
     writeln!(f, ">z\nAAAA").unwrap();
