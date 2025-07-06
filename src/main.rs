@@ -1,4 +1,4 @@
-use seqrush::seqrush::{Args, run_seqrush};
+use seqrush::{Args, run_seqrush};
 
 #[cfg(feature = "cli")]
 mod cli;
