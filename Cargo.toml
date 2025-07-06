@@ -25,3 +25,4 @@ clap = { version = "4", features = ["derive"], optional = true }
 cli = ["clap"]
 
 [dev-dependencies]
+tempfile = "3"
