@@ -55,7 +55,8 @@ seqrush test.fasta test.gfa
 
 ### Prerequisites
 
-- Rust via `rustup` (the required version is pinned in `rust-toolchain.toml`)
+- Rust via `rustup` (install the version pinned in `rust-toolchain.toml` or
+  provide it via an offline setup)
 - Git
 
 ### Build from Source
@@ -162,7 +163,7 @@ L	2	+	3	+	0M
 
 ```bash
 # Run all tests
-cargo test
+cargo test --features cli
 
 # Run with verbose output
 cargo test -- --nocapture
