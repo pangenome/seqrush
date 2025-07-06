@@ -1,7 +1,7 @@
 #[cfg(feature = "cli")]
 use clap::Parser;
 #[cfg(feature = "cli")]
-use seqrush::Args;
+use crate::Args;
 
 #[cfg(feature = "cli")]
 #[derive(Parser)]
