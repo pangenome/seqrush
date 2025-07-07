@@ -13,6 +13,9 @@ pub mod inversion_aware_seqrush;
 mod compaction_tests;
 
 #[cfg(test)]
+mod reverse_complement_tests;
+
+#[cfg(test)]
 mod tests {
     use super::seqrush::*;
     use std::fs;
