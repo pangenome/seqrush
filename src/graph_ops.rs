@@ -329,45 +329,110 @@ impl Graph {
     
     /// Perform topological sort on the graph
     pub fn topological_sort(&mut self) {
-        // For now, use a simple DFS-based topological sort that works well for our use case
+        // Use an improved algorithm that handles cycles and optimizes for visualization
         let mut visited = HashSet::new();
         let mut stack = Vec::new();
         
-        // Build adjacency list
+        // Build adjacency lists
         let mut adj_list: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut in_degree: HashMap<usize, usize> = HashMap::new();
+        
+        // Initialize
         for node_id in self.nodes.keys() {
             adj_list.insert(*node_id, Vec::new());
-        }
-        for edge in &self.edges {
-            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
+            in_degree.insert(*node_id, 0);
         }
         
-        // DFS to get topological order
-        fn dfs(node: usize, adj_list: &HashMap<usize, Vec<usize>>, 
-               visited: &mut HashSet<usize>, stack: &mut Vec<usize>) {
+        // Build adjacency list and compute in-degrees
+        for edge in &self.edges {
+            adj_list.get_mut(&edge.from).unwrap().push(edge.to);
+            *in_degree.get_mut(&edge.to).unwrap() += 1;
+        }
+        
+        // First, try to find nodes that appear at the beginning of paths
+        let mut path_starts: HashSet<usize> = HashSet::new();
+        for (_, path) in &self.paths {
+            if let Some(&first) = path.first() {
+                path_starts.insert(first);
+            }
+        }
+        
+        // Use modified Kahn's algorithm with path-aware ordering
+        let mut queue: Vec<usize> = Vec::new();
+        
+        // Start with nodes that have no incoming edges and appear at path starts
+        for (&node_id, &degree) in &in_degree {
+            if degree == 0 {
+                queue.push(node_id);
+            }
+        }
+        
+        // Sort queue to prefer path starts
+        queue.sort_by_key(|&node| (!path_starts.contains(&node), node));
+        
+        // Process nodes in topological order
+        while let Some(node) = queue.pop() {
+            stack.push(node);
             visited.insert(node);
+            
+            // Process neighbors
             if let Some(neighbors) = adj_list.get(&node) {
+                let mut next_nodes = Vec::new();
+                
                 for &neighbor in neighbors {
-                    if !visited.contains(&neighbor) {
-                        dfs(neighbor, adj_list, visited, stack);
+                    if let Some(degree) = in_degree.get_mut(&neighbor) {
+                        *degree = degree.saturating_sub(1);
+                        if *degree == 0 && !visited.contains(&neighbor) {
+                            next_nodes.push(neighbor);
+                        }
                     }
                 }
+                
+                // Sort next nodes to maintain consistency
+                next_nodes.sort_by_key(|&node| (!path_starts.contains(&node), node));
+                queue.extend(next_nodes.into_iter().rev());
             }
+        }
+        
+        // Handle remaining nodes (in cycles) using DFS
+        let mut remaining: Vec<_> = self.nodes.keys()
+            .filter(|&&id| !visited.contains(&id))
+            .cloned()
+            .collect();
+        remaining.sort(); // Ensure deterministic order
+        
+        fn dfs_cycle(node: usize, adj_list: &HashMap<usize, Vec<usize>>, 
+                     visited: &mut HashSet<usize>, stack: &mut Vec<usize>,
+                     visiting: &mut HashSet<usize>) {
+            if visiting.contains(&node) || visited.contains(&node) {
+                return;
+            }
+            
+            visiting.insert(node);
+            
+            if let Some(neighbors) = adj_list.get(&node) {
+                let mut sorted_neighbors: Vec<_> = neighbors.iter()
+                    .filter(|&&n| !visited.contains(&n))
+                    .cloned()
+                    .collect();
+                sorted_neighbors.sort();
+                
+                for neighbor in sorted_neighbors {
+                    dfs_cycle(neighbor, adj_list, visited, stack, visiting);
+                }
+            }
+            
+            visiting.remove(&node);
+            visited.insert(node);
             stack.push(node);
         }
         
-        // Visit all nodes
-        let mut node_ids: Vec<_> = self.nodes.keys().cloned().collect();
-        node_ids.sort(); // Ensure deterministic order
-        
-        for node_id in node_ids {
+        let mut visiting = HashSet::new();
+        for node_id in remaining {
             if !visited.contains(&node_id) {
-                dfs(node_id, &adj_list, &mut visited, &mut stack);
+                dfs_cycle(node_id, &adj_list, &mut visited, &mut stack, &mut visiting);
             }
         }
-        
-        // Reverse to get correct topological order
-        stack.reverse();
         
         // Create mapping from old to new IDs
         let mut old_to_new = HashMap::new();
