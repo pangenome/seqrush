@@ -327,11 +327,89 @@ impl Graph {
         });
     }
     
+    /// Compute strongly connected components using Tarjan's algorithm
+    #[allow(dead_code)]
+    fn compute_sccs(&self, adj_list: &HashMap<usize, Vec<usize>>) -> Vec<Vec<usize>> {
+        let mut index_counter = 0;
+        let mut stack = Vec::new();
+        let mut indices: HashMap<usize, usize> = HashMap::new();
+        let mut lowlinks: HashMap<usize, usize> = HashMap::new();
+        let mut on_stack: HashSet<usize> = HashSet::new();
+        let mut sccs = Vec::new();
+        
+        fn strongconnect(
+            v: usize,
+            adj_list: &HashMap<usize, Vec<usize>>,
+            index_counter: &mut usize,
+            stack: &mut Vec<usize>,
+            indices: &mut HashMap<usize, usize>,
+            lowlinks: &mut HashMap<usize, usize>,
+            on_stack: &mut HashSet<usize>,
+            sccs: &mut Vec<Vec<usize>>,
+        ) {
+            indices.insert(v, *index_counter);
+            lowlinks.insert(v, *index_counter);
+            *index_counter += 1;
+            stack.push(v);
+            on_stack.insert(v);
+            
+            if let Some(neighbors) = adj_list.get(&v) {
+                for &w in neighbors {
+                    if !indices.contains_key(&w) {
+                        strongconnect(w, adj_list, index_counter, stack, indices, lowlinks, on_stack, sccs);
+                        let w_lowlink = lowlinks[&w];
+                        let v_lowlink = lowlinks[&v];
+                        lowlinks.insert(v, v_lowlink.min(w_lowlink));
+                    } else if on_stack.contains(&w) {
+                        let w_index = indices[&w];
+                        let v_lowlink = lowlinks[&v];
+                        lowlinks.insert(v, v_lowlink.min(w_index));
+                    }
+                }
+            }
+            
+            if lowlinks[&v] == indices[&v] {
+                let mut component = Vec::new();
+                loop {
+                    let w = stack.pop().unwrap();
+                    on_stack.remove(&w);
+                    component.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                sccs.push(component);
+            }
+        }
+        
+        let mut nodes: Vec<_> = self.nodes.keys().cloned().collect();
+        nodes.sort(); // Ensure deterministic order
+        
+        for node in nodes {
+            if !indices.contains_key(&node) {
+                strongconnect(
+                    node,
+                    adj_list,
+                    &mut index_counter,
+                    &mut stack,
+                    &mut indices,
+                    &mut lowlinks,
+                    &mut on_stack,
+                    &mut sccs,
+                );
+            }
+        }
+        
+        sccs
+    }
+    
     /// Perform topological sort on the graph
     pub fn topological_sort(&mut self) {
-        // Use an improved algorithm that handles cycles and optimizes for visualization
+        // Use a multi-pass algorithm that minimizes edge spans
+        
+        // First, do a basic topological sort
         let mut visited = HashSet::new();
-        let mut stack = Vec::new();
+        let mut initial_order = Vec::new();
         
         // Build adjacency lists
         let mut adj_list: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -349,33 +427,36 @@ impl Graph {
             *in_degree.get_mut(&edge.to).unwrap() += 1;
         }
         
-        // First, try to find nodes that appear at the beginning of paths
-        let mut path_starts: HashSet<usize> = HashSet::new();
+        // Find path information
+        let mut path_positions: HashMap<usize, Vec<usize>> = HashMap::new();
         for (_, path) in &self.paths {
-            if let Some(&first) = path.first() {
-                path_starts.insert(first);
+            for (pos, &node) in path.iter().enumerate() {
+                path_positions.entry(node).or_insert_with(Vec::new).push(pos);
             }
         }
         
-        // Use modified Kahn's algorithm with path-aware ordering
+        // Modified Kahn's algorithm
         let mut queue: Vec<usize> = Vec::new();
         
-        // Start with nodes that have no incoming edges and appear at path starts
+        // Start with nodes that have no incoming edges
         for (&node_id, &degree) in &in_degree {
             if degree == 0 {
                 queue.push(node_id);
             }
         }
         
-        // Sort queue to prefer path starts
-        queue.sort_by_key(|&node| (!path_starts.contains(&node), node));
+        // Sort by average position in paths
+        queue.sort_by_key(|&node| {
+            path_positions.get(&node)
+                .map(|positions| positions.iter().sum::<usize>() / positions.len())
+                .unwrap_or(usize::MAX)
+        });
         
-        // Process nodes in topological order
+        // Process nodes
         while let Some(node) = queue.pop() {
-            stack.push(node);
+            initial_order.push(node);
             visited.insert(node);
             
-            // Process neighbors
             if let Some(neighbors) = adj_list.get(&node) {
                 let mut next_nodes = Vec::new();
                 
@@ -388,27 +469,29 @@ impl Graph {
                     }
                 }
                 
-                // Sort next nodes to maintain consistency
-                next_nodes.sort_by_key(|&node| (!path_starts.contains(&node), node));
+                // Sort by path position
+                next_nodes.sort_by_key(|&node| {
+                    path_positions.get(&node)
+                        .map(|positions| positions.iter().sum::<usize>() / positions.len())
+                        .unwrap_or(usize::MAX)
+                });
                 queue.extend(next_nodes.into_iter().rev());
             }
         }
         
-        // Handle remaining nodes (in cycles) using DFS
+        // Handle remaining nodes (in cycles)
         let mut remaining: Vec<_> = self.nodes.keys()
             .filter(|&&id| !visited.contains(&id))
             .cloned()
             .collect();
-        remaining.sort(); // Ensure deterministic order
+        remaining.sort();
         
-        fn dfs_cycle(node: usize, adj_list: &HashMap<usize, Vec<usize>>, 
-                     visited: &mut HashSet<usize>, stack: &mut Vec<usize>,
-                     visiting: &mut HashSet<usize>) {
-            if visiting.contains(&node) || visited.contains(&node) {
+        fn dfs_visit(node: usize, adj_list: &HashMap<usize, Vec<usize>>, 
+                     visited: &mut HashSet<usize>, stack: &mut Vec<usize>) {
+            if visited.contains(&node) {
                 return;
             }
-            
-            visiting.insert(node);
+            visited.insert(node);
             
             if let Some(neighbors) = adj_list.get(&node) {
                 let mut sorted_neighbors: Vec<_> = neighbors.iter()
@@ -418,25 +501,115 @@ impl Graph {
                 sorted_neighbors.sort();
                 
                 for neighbor in sorted_neighbors {
-                    dfs_cycle(neighbor, adj_list, visited, stack, visiting);
+                    dfs_visit(neighbor, adj_list, visited, stack);
                 }
             }
             
-            visiting.remove(&node);
-            visited.insert(node);
             stack.push(node);
         }
         
-        let mut visiting = HashSet::new();
         for node_id in remaining {
             if !visited.contains(&node_id) {
-                dfs_cycle(node_id, &adj_list, &mut visited, &mut stack, &mut visiting);
+                dfs_visit(node_id, &adj_list, &mut visited, &mut initial_order);
+            }
+        }
+        
+        // Now optimize the ordering to minimize edge spans
+        // Create position map
+        let mut position: HashMap<usize, usize> = HashMap::new();
+        for (pos, &node) in initial_order.iter().enumerate() {
+            position.insert(node, pos);
+        }
+        
+        // Calculate edge spans and identify problematic nodes
+        let mut node_span_scores: HashMap<usize, f64> = HashMap::new();
+        
+        for edge in &self.edges {
+            if let (Some(&from_pos), Some(&to_pos)) = 
+                (position.get(&edge.from), position.get(&edge.to)) {
+                let span = if to_pos > from_pos { 
+                    to_pos - from_pos 
+                } else { 
+                    from_pos - to_pos 
+                };
+                
+                // Accumulate span scores for nodes
+                *node_span_scores.entry(edge.from).or_insert(0.0) += span as f64;
+                *node_span_scores.entry(edge.to).or_insert(0.0) += span as f64;
+            }
+        }
+        
+        // Identify nodes with high span scores
+        let mut problematic_nodes: Vec<(usize, f64)> = node_span_scores.iter()
+            .map(|(&node, &score)| (node, score))
+            .filter(|(_, score)| *score > 100.0) // Threshold for problematic nodes
+            .collect();
+        problematic_nodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        
+        // Try to reposition problematic nodes
+        let mut final_order = initial_order.clone();
+        
+        for (prob_node, _) in problematic_nodes.iter().take(50) { // Limit iterations
+            // Find optimal position for this node
+            let current_position = position[prob_node];
+            let mut best_position = current_position;
+            let mut best_score = f64::MAX;
+            
+            // Calculate connected nodes' positions
+            let mut connected_positions = Vec::new();
+            
+            if let Some(neighbors) = adj_list.get(prob_node) {
+                for &neighbor in neighbors {
+                    if let Some(&pos) = position.get(&neighbor) {
+                        connected_positions.push(pos);
+                    }
+                }
+            }
+            
+            // Check incoming edges too
+            for edge in &self.edges {
+                if edge.to == *prob_node {
+                    if let Some(&pos) = position.get(&edge.from) {
+                        connected_positions.push(pos);
+                    }
+                }
+            }
+            
+            if !connected_positions.is_empty() {
+                // Try median position
+                connected_positions.sort();
+                let median_pos = connected_positions[connected_positions.len() / 2];
+                
+                // Calculate score at median position
+                let score: f64 = connected_positions.iter()
+                    .map(|&pos| (median_pos as i32 - pos as i32).abs() as f64)
+                    .sum();
+                
+                if score < best_score {
+                    best_score = score;
+                    best_position = median_pos;
+                }
+            }
+            
+            // Update position if it improves things
+            if best_position != position[prob_node] {
+                // Remove from current position
+                final_order.retain(|&n| n != *prob_node);
+                
+                // Insert at new position
+                let insert_pos = best_position.min(final_order.len());
+                final_order.insert(insert_pos, *prob_node);
+                
+                // Update position map
+                for (pos, &node) in final_order.iter().enumerate() {
+                    position.insert(node, pos);
+                }
             }
         }
         
         // Create mapping from old to new IDs
         let mut old_to_new = HashMap::new();
-        for (new_id, &old_id) in stack.iter().enumerate() {
+        for (new_id, &old_id) in final_order.iter().enumerate() {
             old_to_new.insert(old_id, new_id + 1); // 1-based IDs
         }
         
