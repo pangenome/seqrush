@@ -142,12 +142,12 @@ mod compaction_tests {
             assert_eq!(graph.nodes.len(), 7); // No compaction occurred
         } else {
             // If compaction did occur, it should be the 3->4->5 chain
-            assert_eq!(compacted, 2); // 2 nodes merged away (4 and 5 into 3)
-            assert_eq!(graph.nodes.len(), 5); // 7 - 2 = 5 nodes remain
+            assert_eq!(compacted, 3); // 3 nodes merged away (3, 4 and 5 merged together)
+            assert_eq!(graph.nodes.len(), 4); // 7 - 3 = 4 nodes remain
             
-            // Check that the compacted node has the right sequence (CDE from nodes 3,4,5)
+            // Check that the compacted node has the right sequence (BCDE from nodes 2,3,4,5)
             let has_merged_sequence = graph.nodes.values()
-                .any(|n| n.sequence == vec![b'C', b'D', b'E']);
+                .any(|n| n.sequence == vec![b'B', b'C', b'D', b'E']);
             assert!(has_merged_sequence);
         }
     }
