@@ -33,6 +33,10 @@ pub struct Args {
     #[arg(short = 'S', long = "scores", default_value = "0,5,8,2,24,1")]
     pub scores: String,
     
+    /// Orientation check alignment scores for fast edit distance (match,mismatch,gap_open,gap_extend)
+    #[arg(long = "orientation-scores", default_value = "0,1,1,1")]
+    pub orientation_scores: String,
+    
     /// Maximum divergence threshold (0.0-1.0, e.g., 0.1 = 10% divergence)
     #[arg(short = 'd', long = "max-divergence")]
     pub max_divergence: Option<f64>,
@@ -103,6 +107,32 @@ impl AlignmentScores {
             gap1_extend,
             gap2_open,
             gap2_extend,
+        })
+    }
+    
+    pub fn parse_orientation(scores_str: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = scores_str.split(',').collect();
+        
+        if parts.len() != 4 {
+            return Err("Orientation scores must have exactly 4 values: match,mismatch,gap_open,gap_extend".to_string());
+        }
+        
+        let match_score = parts[0].parse::<i32>()
+            .map_err(|_| format!("Invalid match score: {}", parts[0]))?;
+        let mismatch_penalty = parts[1].parse::<i32>()
+            .map_err(|_| format!("Invalid mismatch penalty: {}", parts[1]))?;
+        let gap_open = parts[2].parse::<i32>()
+            .map_err(|_| format!("Invalid gap_open penalty: {}", parts[2]))?;
+        let gap_extend = parts[3].parse::<i32>()
+            .map_err(|_| format!("Invalid gap_extend penalty: {}", parts[3]))?;
+        
+        Ok(AlignmentScores {
+            match_score,
+            mismatch_penalty,
+            gap1_open: gap_open,
+            gap1_extend: gap_extend,
+            gap2_open: None,
+            gap2_extend: None,
         })
     }
     
@@ -189,8 +219,18 @@ impl SeqRush {
             }
         };
         
+        // Parse orientation check scores
+        let orientation_scores = match AlignmentScores::parse_orientation(&args.orientation_scores) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error parsing orientation scores: {}", e);
+                std::process::exit(1);
+            }
+        };
+        
         if args.verbose {
             println!("Using alignment scores: {:?}", scores);
+            println!("Using orientation check scores: {:?}", orientation_scores);
         }
         
         let n = self.sequences.len();
@@ -202,11 +242,11 @@ impl SeqRush {
         
         // Process pairs in parallel
         pairs.par_iter().for_each(|&(i, j)| {
-            self.align_pair(i, j, args, &scores);
+            self.align_pair(i, j, args, &scores, &orientation_scores);
         });
     }
     
-    fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores) {
+    fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores, orientation_scores: &AlignmentScores) {
         let seq1 = &self.sequences[idx1];
         let seq2 = &self.sequences[idx2];
         
@@ -222,13 +262,46 @@ impl SeqRush {
             println!("Aligning {} vs {}", seq1.id, seq2.id);
         }
         
+        // First, do fast orientation check with edit distance scoring
+        let mut orientation_wf = AffineWavefronts::with_penalties(
+            orientation_scores.match_score,
+            orientation_scores.mismatch_penalty,
+            orientation_scores.gap1_open,
+            orientation_scores.gap1_extend
+        );
+        orientation_wf.set_memory_mode(MemoryMode::Ultralow);
+        
+        // Try forward-forward orientation check
+        let status_ff = orientation_wf.align(&seq1.data, &seq2.data);
+        let orientation_score_ff = if matches!(status_ff, AlignmentStatus::Completed) {
+            orientation_wf.score().abs()
+        } else {
+            i32::MAX
+        };
+        
+        // Try forward-reverse orientation check
+        let seq2_rc = seq2.reverse_complement();
+        let status_fr = orientation_wf.align(&seq1.data, &seq2_rc);
+        let orientation_score_fr = if matches!(status_fr, AlignmentStatus::Completed) {
+            orientation_wf.score().abs()
+        } else {
+            i32::MAX
+        };
+        
+        if args.verbose {
+            println!("  Orientation check - FF score: {}, FR score: {}", orientation_score_ff, orientation_score_fr);
+        }
+        
+        // Choose the better orientation
+        let use_reverse = orientation_score_fr < orientation_score_ff && !args.test_mode;
+        
         // Calculate max score threshold if divergence is specified
         let max_score = args.max_divergence.map(|div| {
             let avg_len = (seq1.data.len() + seq2.data.len()) / 2;
             scores.max_score_for_divergence(avg_len, div)
         });
         
-        // Create WFA aligner
+        // Create WFA aligner for full alignment
         let mut wf = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
             // Two-piece affine gap model
             // TODO: Update when WFA2 bindings support two-piece affine
@@ -250,70 +323,49 @@ impl SeqRush {
         };
         wf.set_memory_mode(MemoryMode::Ultralow);
         
-        // Try forward-forward alignment
-        let status_ff = wf.align(&seq1.data, &seq2.data);
-        let score_ff = if matches!(status_ff, AlignmentStatus::Completed) {
-            wf.score().abs()  // Convert to positive for easier comparison
-        } else {
-            i32::MAX
-        };
-        
-        // Try reverse complement alignment unless in test mode
-        let (_status_fr, score_fr) = if !args.test_mode {
-            let seq2_rc = seq2.reverse_complement();
+        // Perform alignment in the chosen orientation
+        let (status, score, is_reverse) = if use_reverse {
+            // Forward-reverse alignment
             let status = wf.align(&seq1.data, &seq2_rc);
             let score = if matches!(status, AlignmentStatus::Completed) {
-                wf.score().abs()  // Convert to positive for easier comparison
+                wf.score().abs()
             } else {
                 i32::MAX
             };
-            (status, score)
+            (status, score, true)
         } else {
-            (AlignmentStatus::Undefined, i32::MAX)
+            // Forward-forward alignment
+            let status = wf.align(&seq1.data, &seq2.data);
+            let score = if matches!(status, AlignmentStatus::Completed) {
+                wf.score().abs()
+            } else {
+                i32::MAX
+            };
+            (status, score, false)
         };
         
         if args.verbose {
-            println!("  Forward-Forward score: {}", score_ff);
-            println!("  Forward-Reverse score: {}", score_fr);
+            println!("  Full alignment score: {} ({})", score, if is_reverse { "reverse" } else { "forward" });
         }
         
-        // Check if either alignment meets threshold
+        // Check if alignment meets threshold
         if let Some(threshold) = max_score {
-            if score_ff > threshold && score_fr > threshold {
+            if score > threshold {
                 if args.verbose {
-                    println!("  Both alignments exceed divergence threshold ({})", threshold);
+                    println!("  Alignment exceeds divergence threshold ({})", threshold);
                 }
                 return;
             }
         }
         
-        // Use the better alignment
-        if score_ff <= score_fr && score_ff != i32::MAX {
-            // Re-run forward-forward to get CIGAR
-            let status = wf.align(&seq1.data, &seq2.data);
-            if matches!(status, AlignmentStatus::Completed) {
-                let cigar_bytes = wf.cigar();
-                let cigar = String::from_utf8_lossy(cigar_bytes);
-                if args.verbose {
-                    println!("  Using Forward-Forward alignment");
-                    println!("  CIGAR: {}", cigar);
-                }
-                self.process_alignment(&cigar, seq1, seq2, args.min_match_length, false);
+        // Process the alignment if successful
+        if matches!(status, AlignmentStatus::Completed) && score != i32::MAX {
+            let cigar_bytes = wf.cigar();
+            let cigar = String::from_utf8_lossy(cigar_bytes);
+            if args.verbose {
+                println!("  CIGAR: {}", cigar);
             }
-        } else if score_fr != i32::MAX && !args.test_mode {
-            // Re-run forward-reverse to get CIGAR
-            let seq2_rc = seq2.reverse_complement();
-            let status = wf.align(&seq1.data, &seq2_rc);
-            if matches!(status, AlignmentStatus::Completed) {
-                let cigar_bytes = wf.cigar();
-                let cigar = String::from_utf8_lossy(cigar_bytes);
-                if args.verbose {
-                    println!("  Using Forward-Reverse alignment");
-                    println!("  CIGAR: {}", cigar);
-                }
-                // Note: seq2 is reverse complemented in this alignment
-                self.process_alignment(&cigar, seq1, seq2, args.min_match_length, true);
-            }
+            self.process_alignment(&cigar, seq1, seq2, args.min_match_length, is_reverse);
         }
     }
     
@@ -547,15 +599,16 @@ impl SeqRush {
                         if let Some(node) = graph.nodes.get_mut(&id) {
                             // If this is a new character in the same union, extend the node's sequence
                             if node.sequence.is_empty() || node.sequence[node.sequence.len() - 1] != seq.data[i] {
-                                // Character differs from last in node - this suggests union-find merged different characters
+                                // Character differs from last in node - this is expected in bidirectional graphs
+                                // when positions from different strands are united
                                 if !node.sequence.is_empty() && node.sequence[0] != seq.data[i] {
                                     if verbose {
-                                        eprintln!("INFO: Union {} contains multiple characters: {} and {}", 
+                                        eprintln!("INFO: Union {} contains multiple characters: {} and {} (expected for bidirectional graph)", 
                                                  union, node.sequence[0] as char, seq.data[i] as char);
                                     }
                                 }
-                                // For now, keep only the first character to maintain single-char nodes
-                                // This is where the algorithm needs improvement for proper multi-char nodes
+                                // Keep the first character we saw for this union
+                                // In a proper bidirectional graph implementation, we'd track both
                             }
                         }
                         id

@@ -34,6 +34,7 @@ fn test_real_inversion_case() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
@@ -71,6 +72,7 @@ fn test_larger_inversion_with_unique_content() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
@@ -108,6 +110,7 @@ fn test_inversion_with_snps() {
         threads: 1,
         min_match_length: 3, // Smaller to allow for SNPs
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: Some(0.2), // Allow 20% divergence
         verbose: true,
         test_mode: false,
