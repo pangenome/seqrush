@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write, BufRead, BufReader};
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::sync::Mutex;
 use uf_rush::UFRush;
 use lib_wfa2::affine_wavefront::{AffineWavefronts, MemoryMode, AlignmentStatus};
 use crate::graph_ops::{Graph, Node, Edge};
@@ -56,6 +57,10 @@ pub struct Args {
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
     #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
     pub sparsification: String,
+    
+    /// Output alignments to PAF file
+    #[arg(long = "output-alignments")]
+    pub output_alignments: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -233,6 +238,22 @@ impl SeqRush {
             println!("Using orientation check scores: {:?}", orientation_scores);
         }
         
+        // Create PAF writer if requested
+        let paf_writer = if let Some(paf_path) = &args.output_alignments {
+            match File::create(paf_path) {
+                Ok(file) => {
+                    println!("Writing alignments to {}", paf_path);
+                    Some(Arc::new(Mutex::new(BufWriter::new(file))))
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to create PAF file {}: {}", paf_path, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         let n = self.sequences.len();
         let pairs: Vec<(usize, usize)> = (0..n)
             .flat_map(|i| (i+1..n).map(move |j| (i, j)))
@@ -248,11 +269,18 @@ impl SeqRush {
         
         // Process pairs in parallel
         pairs.par_iter().for_each(|&(i, j)| {
-            self.align_pair(i, j, args, &scores, &orientation_scores);
+            self.align_pair(i, j, args, &scores, &orientation_scores, &paf_writer);
         });
+        
+        // Flush PAF writer
+        if let Some(writer) = paf_writer {
+            if let Ok(mut w) = writer.lock() {
+                let _ = w.flush();
+            }
+        }
     }
     
-    fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores, orientation_scores: &AlignmentScores) {
+    fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores, orientation_scores: &AlignmentScores, paf_writer: &Option<Arc<Mutex<BufWriter<File>>>>) {
         let seq1 = &self.sequences[idx1];
         let seq2 = &self.sequences[idx2];
         
@@ -371,6 +399,12 @@ impl SeqRush {
             if args.verbose {
                 println!("  CIGAR: {}", cigar);
             }
+            
+            // Write PAF output if requested
+            if let Some(writer) = paf_writer {
+                self.write_paf_record(writer, seq1, seq2, &cigar, score, is_reverse, &wf);
+            }
+            
             self.process_alignment(&cigar, seq1, seq2, args.min_match_length, is_reverse);
         }
     }
@@ -485,6 +519,147 @@ impl SeqRush {
                 self.union_find.unite(global_pos1, global_pos2);
             }
         }
+    }
+    
+    fn write_paf_record(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq1: &Sequence, seq2: &Sequence, 
+                       cigar: &str, score: i32, is_reverse: bool, _wf: &AffineWavefronts) {
+        // Convert CIGAR to --eqx style (M -> =)
+        let eqx_cigar = self.convert_to_eqx_cigar(cigar);
+        
+        // Calculate alignment lengths and statistics from CIGAR
+        let (query_start, query_end, target_start, target_end, num_matches, block_length) = 
+            self.parse_cigar_for_paf(&eqx_cigar, seq1.data.len(), seq2.data.len(), is_reverse);
+        
+        // PAF format: query_name query_len query_start query_end strand target_name target_len target_start target_end num_matches block_len mapping_quality
+        // Additional fields: NM:i:edit_distance AS:i:alignment_score cg:Z:cigar
+        let strand = if is_reverse { '-' } else { '+' };
+        let mapq = 60; // High quality since we're doing full alignment
+        
+        // Calculate edit distance from score (assuming match=0, mismatch and gaps add to score)
+        let edit_distance = score;
+        
+        if let Ok(mut w) = writer.lock() {
+            let _ = writeln!(w, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tNM:i:{}\tAS:i:{}\tcg:Z:{}",
+                seq1.id,
+                seq1.data.len(),
+                query_start,
+                query_end,
+                strand,
+                seq2.id,
+                seq2.data.len(),
+                target_start,
+                target_end,
+                num_matches,
+                block_length,
+                mapq,
+                edit_distance,
+                -score, // AS tag is typically negative of edit distance
+                eqx_cigar
+            );
+        }
+    }
+    
+    fn convert_to_eqx_cigar(&self, cigar: &str) -> String {
+        // Convert M operations to = for matches (--eqx style) and compact the CIGAR
+        let mut result = String::new();
+        let mut count = 0;
+        let mut current_op: Option<char> = None;
+        let mut op_count = 0;
+        
+        for ch in cigar.chars() {
+            if ch.is_ascii_digit() {
+                count = count * 10 + (ch as usize - '0' as usize);
+            } else {
+                if count == 0 { count = 1; }
+                
+                // Convert M to =
+                let op = if ch == 'M' { '=' } else { ch };
+                
+                // If this is a new operation type, write out the previous one
+                if current_op.is_some() && current_op != Some(op) {
+                    result.push_str(&op_count.to_string());
+                    result.push(current_op.unwrap());
+                    op_count = 0;
+                }
+                
+                // Accumulate counts for the same operation
+                current_op = Some(op);
+                op_count += count;
+                count = 0;
+            }
+        }
+        
+        // Write out the last operation
+        if let Some(op) = current_op {
+            result.push_str(&op_count.to_string());
+            result.push(op);
+        }
+        
+        result
+    }
+    
+    fn parse_cigar_for_paf(&self, cigar: &str, _query_len: usize, target_len: usize, is_reverse: bool) 
+        -> (usize, usize, usize, usize, usize, usize) {
+        let mut query_pos = 0;
+        let mut target_pos = 0;
+        let mut num_matches = 0;
+        let mut count = 0;
+        
+        // Track start positions (first match position)
+        let mut query_start = 0;
+        let mut target_start = 0;
+        let mut found_first_match = false;
+        
+        for ch in cigar.chars() {
+            if ch.is_ascii_digit() {
+                count = count * 10 + (ch as usize - '0' as usize);
+            } else {
+                if count == 0 { count = 1; }
+                
+                match ch {
+                    'M' | '=' => {
+                        if !found_first_match {
+                            query_start = query_pos;
+                            target_start = target_pos;
+                            found_first_match = true;
+                        }
+                        // For --eqx style, = means match
+                        num_matches += count;
+                        query_pos += count;
+                        target_pos += count;
+                    }
+                    'X' => {
+                        if !found_first_match {
+                            query_start = query_pos;
+                            target_start = target_pos;
+                            found_first_match = true;
+                        }
+                        query_pos += count;
+                        target_pos += count;
+                    }
+                    'I' => {
+                        query_pos += count;
+                    }
+                    'D' => {
+                        target_pos += count;
+                    }
+                    _ => {}
+                }
+                count = 0;
+            }
+        }
+        
+        // For reverse strand, adjust target coordinates
+        let (final_target_start, final_target_end) = if is_reverse {
+            (target_len - target_pos, target_len - target_start)
+        } else {
+            (target_start, target_pos)
+        };
+        
+        // Block length is the span in both query and target
+        let block_length = query_pos.max(target_pos);
+        
+        (query_start, query_pos, final_target_start, final_target_end, num_matches, block_length)
     }
     
     fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {

@@ -77,7 +77,8 @@ fn test_base_case_empty() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -118,7 +119,8 @@ fn test_base_case_single_base() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -209,7 +211,8 @@ fn test_identical_sequences_share_nodes() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -254,6 +257,7 @@ fn test_inductive_sequence_extension() {
             test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         run_seqrush_bidirected_simple(args).unwrap();
@@ -341,7 +345,8 @@ fn test_path_reconstruction_correctness() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -392,7 +397,8 @@ fn test_edge_connectivity() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -436,7 +442,8 @@ fn test_palindromic_sequences() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -472,7 +479,8 @@ fn test_union_find_with_matches() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -518,7 +526,8 @@ fn test_large_sequences() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -554,7 +563,8 @@ fn test_transitivity_of_matches() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     

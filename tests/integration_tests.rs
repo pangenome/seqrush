@@ -47,6 +47,7 @@ fn test_performance_scaling() {
             test_mode: true,
             no_compact: true,
         sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         let start = Instant::now();
@@ -122,7 +123,8 @@ fn test_real_world_example() {
         test_mode: true,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush(args).unwrap();
     
@@ -156,7 +158,8 @@ fn test_command_line_interface() {
         test_mode: true,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush(args).unwrap();
     
@@ -202,6 +205,7 @@ fn test_parallel_consistency() {
             test_mode: true,
             no_compact: true,
         sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         run_seqrush(args).unwrap();

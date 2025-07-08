@@ -553,7 +553,7 @@ impl Graph {
             // Find optimal position for this node
             let current_position = position[prob_node];
             let mut best_position = current_position;
-            let mut best_score = f64::MAX;
+            let mut _best_score = f64::MAX;
             
             // Calculate connected nodes' positions
             let mut connected_positions = Vec::new();
@@ -585,8 +585,8 @@ impl Graph {
                     .map(|&pos| (median_pos as i32 - pos as i32).abs() as f64)
                     .sum();
                 
-                if score < best_score {
-                    best_score = score;
+                if score < _best_score {
+                    _best_score = score;
                     best_position = median_pos;
                 }
             }

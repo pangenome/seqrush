@@ -39,7 +39,8 @@ fn test_simple_inversion() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -107,7 +108,8 @@ fn test_complex_rearrangement() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -165,7 +167,8 @@ fn test_self_inverse_palindrome() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_seqrush_bidirected_simple(args).unwrap();
     

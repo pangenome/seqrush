@@ -57,6 +57,7 @@ mod reverse_complement_tests {
             orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         // Build the graph
@@ -105,6 +106,7 @@ mod reverse_complement_tests {
             orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         run_seqrush(args).unwrap();
@@ -160,6 +162,7 @@ mod reverse_complement_tests {
             orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         run_seqrush(args).unwrap();
@@ -262,6 +265,7 @@ mod reverse_complement_tests {
             orientation_scores: "0,-1,2,1".to_string(),
             max_divergence: None,
             sparsification: "1.0".to_string(),
+            output_alignments: None,
         };
         
         run_seqrush(args).unwrap();

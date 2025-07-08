@@ -39,7 +39,8 @@ fn test_inversion_detection_simple() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     println!("Running inversion-aware alignment...");
     run_inversion_aware_seqrush(args).unwrap();
@@ -94,7 +95,8 @@ fn test_inversion_detection_with_context() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     println!("\nRunning inversion detection with context...");
     run_inversion_aware_seqrush(args).unwrap();
@@ -135,7 +137,8 @@ fn test_no_inversion() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -171,7 +174,8 @@ fn test_multiple_inversions() {
         test_mode: false,
             no_compact: true,
         sparsification: "1.0".to_string(),
-    };
+            output_alignments: None,
+        };
     
     println!("\nRunning multiple inversion detection...");
     run_inversion_aware_seqrush(args).unwrap();
