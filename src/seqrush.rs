@@ -714,18 +714,10 @@ impl SeqRush {
         }
         
         // Hash the sequence names to get a deterministic pseudo-random value
+        // Order matters: A→B is different from B→A
         let mut hasher = DefaultHasher::new();
-        let seq1_name = &self.sequences[idx1].id;
-        let seq2_name = &self.sequences[idx2].id;
-        
-        // Use lexicographic order to ensure consistent hashing regardless of order
-        if seq1_name < seq2_name {
-            seq1_name.hash(&mut hasher);
-            seq2_name.hash(&mut hasher);
-        } else {
-            seq2_name.hash(&mut hasher);
-            seq1_name.hash(&mut hasher);
-        }
+        self.sequences[idx1].id.hash(&mut hasher);
+        self.sequences[idx2].id.hash(&mut hasher);
         let hash_value = hasher.finish();
         
         // Keep the alignment if hash is below threshold
