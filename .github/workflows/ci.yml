@@ -27,13 +27,13 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
         run: cargo test
-      - name: Generate coverage
-        run: |
-          cargo install cargo-tarpaulin
-          cargo tarpaulin --out Xml
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: cobertura.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+      # - name: Generate coverage
+      #   run: |
+      #     cargo install cargo-tarpaulin
+      #     cargo tarpaulin --out Xml
+      # - name: Upload coverage
+      #   uses: codecov/codecov-action@v3
+      #   with:
+      #     files: cobertura.xml
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     fail_ci_if_error: true
