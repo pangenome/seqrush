@@ -154,10 +154,12 @@ fn test_programmatic_inversions_scale() {
         threads: 4,
         min_match_length: 10,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: Some(0.1),
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -211,10 +213,12 @@ fn test_gc_content_variation() {
         threads: 1,
         min_match_length: 8,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: Some(0.2),
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -288,10 +292,12 @@ fn test_motif_based_variations() {
         threads: 1,
         min_match_length: 6,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -352,10 +358,12 @@ fn test_microsatellite_instability() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: Some(0.1),
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -420,10 +428,12 @@ fn test_complex_structural_variation_patterns() {
         threads: 4,
         min_match_length: 15,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: Some(0.1),
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -499,10 +509,12 @@ fn test_nested_tandem_inversions() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();

@@ -33,10 +33,12 @@ fn test_inversion_detection_simple() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     println!("Running inversion-aware alignment...");
@@ -86,10 +88,12 @@ fn test_inversion_detection_with_context() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     println!("\nRunning inversion detection with context...");
@@ -125,10 +129,12 @@ fn test_no_inversion() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -159,10 +165,12 @@ fn test_multiple_inversions() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     println!("\nRunning multiple inversion detection...");

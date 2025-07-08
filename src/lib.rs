@@ -1,5 +1,6 @@
 pub mod seqrush;
 pub mod graph_ops;
+pub mod graph_compaction;
 pub mod bidirected_graph;
 pub mod bidirected_ops;
 pub mod pos;
@@ -10,6 +11,9 @@ pub mod inversion_aware_seqrush;
 
 #[cfg(test)]
 mod compaction_tests;
+
+#[cfg(test)]
+mod reverse_complement_tests;
 
 #[cfg(test)]
 mod tests {
@@ -151,10 +155,12 @@ mod tests {
             threads: 1,
             min_match_length,
             scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             verbose: false,
             test_mode: true,
             no_compact: false, // Enable compaction for tests
+            sparsification: "1.0".to_string(),
         };
         
         run_seqrush(args).unwrap();

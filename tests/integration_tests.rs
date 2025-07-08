@@ -41,10 +41,12 @@ fn test_performance_scaling() {
             threads: 1,
             min_match_length: 15,
             scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             verbose: false,
             test_mode: true,
             no_compact: true,
+        sparsification: "1.0".to_string(),
         };
         
         let start = Instant::now();
@@ -114,10 +116,12 @@ fn test_real_world_example() {
         threads: 2,
         min_match_length: 5,
         scores: "0,5,8,2".to_string(),
+        orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: true,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush(args).unwrap();
@@ -146,10 +150,12 @@ fn test_command_line_interface() {
         threads: 1,
         min_match_length: 15,
         scores: "0,5,8,2".to_string(),
+        orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: true,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush(args).unwrap();
@@ -190,10 +196,12 @@ fn test_parallel_consistency() {
             threads,
             min_match_length: 10,
             scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             verbose: false,
             test_mode: true,
             no_compact: true,
+        sparsification: "1.0".to_string(),
         };
         
         run_seqrush(args).unwrap();

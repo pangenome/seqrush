@@ -87,10 +87,12 @@ fn test_inverted_repeats() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -129,10 +131,12 @@ fn test_complex_cnv_repeats() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -181,10 +185,12 @@ fn test_y_shaped_breakpoint() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -225,10 +231,12 @@ fn test_nested_inversions() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -275,10 +283,12 @@ fn test_random_rearrangements() {
         threads: 1,
         min_match_length: 5,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -319,10 +329,12 @@ fn test_tandem_repeat_polymorphism() {
         threads: 1,
         min_match_length: 3,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -370,10 +382,12 @@ fn test_complex_nested_variations() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: Some(0.2),
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -420,10 +434,12 @@ fn test_interspersed_repeats_with_inversions() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -478,10 +494,12 @@ fn test_breakpoint_resolution() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: true,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_inversion_aware_seqrush(args).unwrap();

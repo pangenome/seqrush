@@ -71,10 +71,12 @@ fn test_base_case_empty() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -110,10 +112,12 @@ fn test_base_case_single_base() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -199,10 +203,12 @@ fn test_identical_sequences_share_nodes() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -242,10 +248,12 @@ fn test_inductive_sequence_extension() {
             threads: 1,
             min_match_length: 1,
             scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
             max_divergence: None,
             verbose: false,
             test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
         };
         
         run_seqrush_bidirected_simple(args).unwrap();
@@ -327,10 +335,12 @@ fn test_path_reconstruction_correctness() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -376,10 +386,12 @@ fn test_edge_connectivity() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -418,10 +430,12 @@ fn test_palindromic_sequences() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -452,10 +466,12 @@ fn test_union_find_with_matches() {
         threads: 1,
         min_match_length: 4,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -496,10 +512,12 @@ fn test_large_sequences() {
         threads: 1,
         min_match_length: 10,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -530,10 +548,12 @@ fn test_transitivity_of_matches() {
         threads: 1,
         min_match_length: 1,
         scores: "0,5,8,2,24,1".to_string(),
+            orientation_scores: "0,1,1,1".to_string(),
         max_divergence: None,
         verbose: false,
         test_mode: false,
             no_compact: true,
+        sparsification: "1.0".to_string(),
     };
     
     run_seqrush_bidirected_simple(args).unwrap();
