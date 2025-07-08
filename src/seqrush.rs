@@ -26,7 +26,7 @@ pub struct Args {
     pub threads: usize,
     
     /// Minimum match length
-    #[arg(short = 'k', long, default_value = "15")]
+    #[arg(short = 'k', long, default_value = "0")]
     pub min_match_length: usize,
     
     /// Alignment scores (match,mismatch,gap_open,gap_extend[,gap2_open,gap2_extend])
@@ -53,7 +53,7 @@ pub struct Args {
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
     
-    /// Sparsification factor (keep this fraction of matches, 1.0 = keep all, 'auto' for automatic)
+    /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
     #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
     pub sparsification: String,
 }
@@ -238,7 +238,13 @@ impl SeqRush {
             .flat_map(|i| (i+1..n).map(move |j| (i, j)))
             .collect();
         
-        println!("Aligning {} sequence pairs", pairs.len());
+        // Count how many pairs will actually be aligned after sparsification
+        let pairs_to_align = pairs.iter()
+            .filter(|&&(i, j)| self.should_align_pair(i, j))
+            .count();
+        
+        println!("Total sequence pairs: {} (will align {} after sparsification)", 
+                 pairs.len(), pairs_to_align);
         
         // Process pairs in parallel
         pairs.par_iter().for_each(|&(i, j)| {
@@ -250,10 +256,10 @@ impl SeqRush {
         let seq1 = &self.sequences[idx1];
         let seq2 = &self.sequences[idx2];
         
-        // Apply sparsification at the alignment level
+        // Apply sparsification at the alignment-pair level (before alignment)
         if !self.should_align_pair(idx1, idx2) {
             if args.verbose {
-                println!("Skipping alignment {} vs {} (sparsification)", seq1.id, seq2.id);
+                println!("Skipping alignment pair {} vs {} (sparsification filter)", seq1.id, seq2.id);
             }
             return;
         }
@@ -707,12 +713,19 @@ impl SeqRush {
             return true; // No sparsification
         }
         
-        // Hash the sequence index pair to get a deterministic pseudo-random value
+        // Hash the sequence names to get a deterministic pseudo-random value
         let mut hasher = DefaultHasher::new();
-        // Use min/max to ensure consistent hashing regardless of order
-        let (min_idx, max_idx) = if idx1 < idx2 { (idx1, idx2) } else { (idx2, idx1) };
-        min_idx.hash(&mut hasher);
-        max_idx.hash(&mut hasher);
+        let seq1_name = &self.sequences[idx1].id;
+        let seq2_name = &self.sequences[idx2].id;
+        
+        // Use lexicographic order to ensure consistent hashing regardless of order
+        if seq1_name < seq2_name {
+            seq1_name.hash(&mut hasher);
+            seq2_name.hash(&mut hasher);
+        } else {
+            seq2_name.hash(&mut hasher);
+            seq1_name.hash(&mut hasher);
+        }
         let hash_value = hasher.finish();
         
         // Keep the alignment if hash is below threshold
@@ -768,10 +781,10 @@ pub fn run_seqrush(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     
     // Calculate sparsification threshold
     let sparsity_threshold = if args.sparsification == "auto" {
-        // Use Erdős-Rényi model: keep 10 * log(n) / n fraction of matches
+        // Use Erdős-Rényi model: keep 10 * log(n) / n fraction of alignment pairs
         let n = sequences.len() as f64;
         let fraction = (10.0 * n.ln() / n).min(1.0);
-        println!("Auto sparsification: keeping {:.2}% of matches (n={})", fraction * 100.0, sequences.len());
+        println!("Auto sparsification: keeping {:.2}% of alignment pairs (n={})", fraction * 100.0, sequences.len());
         (fraction * u64::MAX as f64) as u64
     } else {
         match args.sparsification.parse::<f64>() {
@@ -779,7 +792,7 @@ pub fn run_seqrush(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 if frac == 1.0 {
                     u64::MAX
                 } else {
-                    println!("Sparsification: keeping {:.2}% of matches", frac * 100.0);
+                    println!("Sparsification: keeping {:.2}% of alignment pairs", frac * 100.0);
                     (frac * u64::MAX as f64) as u64
                 }
             }
