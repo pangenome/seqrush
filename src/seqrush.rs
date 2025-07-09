@@ -403,6 +403,10 @@ impl SeqRush {
             let cigar = String::from_utf8_lossy(cigar_bytes);
             if args.verbose {
                 println!("  CIGAR: {}", cigar);
+                println!("  WFA2 called with: pattern={} (len={}), text={} (len={})", 
+                    if is_reverse { "seq2_rc" } else { "seq2" },
+                    if is_reverse { seq2_rc.len() } else { seq2.data.len() },
+                    "seq1", seq1.data.len());
             }
             
             // Write PAF output if requested
@@ -565,8 +569,18 @@ impl SeqRush {
     
     fn write_paf_record(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq1: &Sequence, seq2: &Sequence, 
                        cigar: &str, score: i32, is_reverse: bool, _wf: &AffineWavefronts) {
+        // PAF format conventions:
+        // - query = seq1, target = seq2
+        // - WFA2 was called with (pattern, text) = (seq2, seq1) for forward alignment
+        // - WFA2 was called with (pattern, text) = (seq2_rc, seq1) for reverse alignment
+        // - CIGAR operations: I = insertion in text (seq1) relative to pattern (seq2)
+        //                     D = deletion in text (seq1) relative to pattern (seq2)
+        
+        // For PAF output, we need to invert the CIGAR since WFA2 gave us target->query but PAF expects query->target
+        let inverted_cigar = self.invert_cigar(cigar);
+        
         // Convert CIGAR to --eqx style (M -> =/X)
-        let eqx_cigar = self.convert_to_eqx_cigar(cigar, &seq1.data, &seq2.data, is_reverse);
+        let eqx_cigar = self.convert_to_eqx_cigar(&inverted_cigar, &seq1.data, &seq2.data, is_reverse);
         
         // Calculate alignment lengths and statistics from CIGAR
         let (query_start, query_end, target_start, target_end, num_matches, block_length) = 
@@ -601,21 +615,45 @@ impl SeqRush {
         }
     }
     
+    fn invert_cigar(&self, cigar: &str) -> String {
+        // Invert CIGAR string: I becomes D and D becomes I
+        let mut result = String::new();
+        let mut count = 0;
+        
+        for ch in cigar.chars() {
+            if ch.is_ascii_digit() {
+                count = count * 10 + (ch as usize - '0' as usize);
+            } else {
+                if count == 0 { count = 1; }  // Handle implicit count of 1
+                result.push_str(&count.to_string());
+                let op = match ch {
+                    'I' => 'D',  // Insertion in text becomes deletion in query
+                    'D' => 'I',  // Deletion in text becomes insertion in query
+                    _ => ch,     // M, =, X remain the same
+                };
+                result.push(op);
+                count = 0;
+            }
+        }
+        
+        result
+    }
+    
     fn convert_to_eqx_cigar(&self, cigar: &str, seq1: &[u8], seq2: &[u8], is_reverse: bool) -> String {
         // Convert M operations to =/X for matches/mismatches (--eqx style) and compact the CIGAR
-        // Note: WFA2 was called with (target, query) order, so:
+        // Parameters:
         // - seq1 is query sequence
-        // - seq2 is target sequence
-        // - CIGAR operations are relative to pattern (target)
+        // - seq2 is target sequence  
+        // - CIGAR operations are now query->target after inversion
         let mut result = String::new();
         let mut count = 0;
         let mut current_op: Option<char> = None;
         let mut op_count = 0;
         
-        let mut pos_target = 0;
-        let mut pos_query = 0;
+        let mut pos_query = 0;   // position in seq1 (query)
+        let mut pos_target = 0;  // position in seq2 (target)
         
-        // If reverse, we're comparing query to reverse complement of target
+        // If reverse, we need to compare query to reverse complement of target
         let seq2_data = if is_reverse {
             let mut rc = seq2.to_vec();
             rc.reverse();
@@ -663,7 +701,7 @@ impl SeqRush {
                         }
                     }
                     'I' => {
-                        // Insertion: extra bases in text (query) relative to pattern (target)
+                        // Insertion in query relative to target
                         let op = 'I';
                         if current_op.is_some() && current_op != Some(op) {
                             result.push_str(&op_count.to_string());
@@ -675,7 +713,7 @@ impl SeqRush {
                         pos_query += count;
                     }
                     'D' => {
-                        // Deletion: extra bases in pattern (target) relative to text (query)
+                        // Deletion in query relative to target
                         let op = 'D';
                         if current_op.is_some() && current_op != Some(op) {
                             result.push_str(&op_count.to_string());
