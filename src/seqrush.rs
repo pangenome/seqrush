@@ -338,13 +338,13 @@ impl SeqRush {
         // Create WFA aligner for full alignment
         let mut wf = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
             // Two-piece affine gap model
-            // TODO: Update when WFA2 bindings support two-piece affine
-            // For now, fall back to single affine
-            AffineWavefronts::with_penalties(
+            AffineWavefronts::with_penalties_affine2p(
                 scores.match_score,
                 scores.mismatch_penalty,
                 scores.gap1_open,
-                scores.gap1_extend
+                scores.gap1_extend,
+                scores.gap2_open.unwrap(),
+                scores.gap2_extend.unwrap()
             )
         } else {
             // Single affine gap model
@@ -491,11 +491,11 @@ impl SeqRush {
                                 pos2 += count; 
                             }
                             'I' => { 
-                                // Insertion in seq2
+                                // Insertion in reference/target
                                 pos2 += count; 
                             }
                             'D' => { 
-                                // Deletion in seq2
+                                // Deletion from reference, present in query
                                 pos1 += count; 
                             }
                             _ => {}
@@ -523,8 +523,8 @@ impl SeqRush {
     
     fn write_paf_record(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq1: &Sequence, seq2: &Sequence, 
                        cigar: &str, score: i32, is_reverse: bool, _wf: &AffineWavefronts) {
-        // Convert CIGAR to --eqx style (M -> =)
-        let eqx_cigar = self.convert_to_eqx_cigar(cigar);
+        // Convert CIGAR to --eqx style (M -> =/X)
+        let eqx_cigar = self.convert_to_eqx_cigar(cigar, &seq1.data, &seq2.data, is_reverse);
         
         // Calculate alignment lengths and statistics from CIGAR
         let (query_start, query_end, target_start, target_end, num_matches, block_length) = 
@@ -559,12 +559,34 @@ impl SeqRush {
         }
     }
     
-    fn convert_to_eqx_cigar(&self, cigar: &str) -> String {
-        // Convert M operations to = for matches (--eqx style) and compact the CIGAR
+    fn convert_to_eqx_cigar(&self, cigar: &str, seq1: &[u8], seq2: &[u8], is_reverse: bool) -> String {
+        // Convert M operations to =/X for matches/mismatches (--eqx style) and compact the CIGAR
+        // We need to walk through the alignment to determine if M operations are matches or mismatches
         let mut result = String::new();
         let mut count = 0;
         let mut current_op: Option<char> = None;
         let mut op_count = 0;
+        
+        let mut pos1 = 0;
+        let mut pos2 = 0;
+        
+        // If reverse, we're comparing seq1 to reverse complement of seq2
+        let seq2_data = if is_reverse {
+            let mut rc = seq2.to_vec();
+            rc.reverse();
+            for b in &mut rc {
+                *b = match *b {
+                    b'A' | b'a' => b'T',
+                    b'T' | b't' => b'A',
+                    b'C' | b'c' => b'G',
+                    b'G' | b'g' => b'C',
+                    _ => *b,
+                };
+            }
+            rc
+        } else {
+            seq2.to_vec()
+        };
         
         for ch in cigar.chars() {
             if ch.is_ascii_digit() {
@@ -572,19 +594,81 @@ impl SeqRush {
             } else {
                 if count == 0 { count = 1; }
                 
-                // Convert M to =
-                let op = if ch == 'M' { '=' } else { ch };
-                
-                // If this is a new operation type, write out the previous one
-                if current_op.is_some() && current_op != Some(op) {
-                    result.push_str(&op_count.to_string());
-                    result.push(current_op.unwrap());
-                    op_count = 0;
+                match ch {
+                    'M' => {
+                        // For M operations, check each position to see if it's a match or mismatch
+                        for _ in 0..count {
+                            let op = if pos1 < seq1.len() && pos2 < seq2_data.len() && seq1[pos1] == seq2_data[pos2] {
+                                '='
+                            } else {
+                                'X'
+                            };
+                            
+                            // Accumulate same operations
+                            if current_op.is_some() && current_op != Some(op) {
+                                result.push_str(&op_count.to_string());
+                                result.push(current_op.unwrap());
+                                op_count = 0;
+                            }
+                            current_op = Some(op);
+                            op_count += 1;
+                            
+                            pos1 += 1;
+                            pos2 += 1;
+                        }
+                    }
+                    'I' => {
+                        // Insertion in target
+                        let op = 'I';
+                        if current_op.is_some() && current_op != Some(op) {
+                            result.push_str(&op_count.to_string());
+                            result.push(current_op.unwrap());
+                            op_count = 0;
+                        }
+                        current_op = Some(op);
+                        op_count += count;
+                        pos2 += count;
+                    }
+                    'D' => {
+                        // Deletion from target
+                        let op = 'D';
+                        if current_op.is_some() && current_op != Some(op) {
+                            result.push_str(&op_count.to_string());
+                            result.push(current_op.unwrap());
+                            op_count = 0;
+                        }
+                        current_op = Some(op);
+                        op_count += count;
+                        pos1 += count;
+                    }
+                    'X' => {
+                        // Already a mismatch
+                        let op = 'X';
+                        if current_op.is_some() && current_op != Some(op) {
+                            result.push_str(&op_count.to_string());
+                            result.push(current_op.unwrap());
+                            op_count = 0;
+                        }
+                        current_op = Some(op);
+                        op_count += count;
+                        pos1 += count;
+                        pos2 += count;
+                    }
+                    '=' => {
+                        // Already a match
+                        let op = '=';
+                        if current_op.is_some() && current_op != Some(op) {
+                            result.push_str(&op_count.to_string());
+                            result.push(current_op.unwrap());
+                            op_count = 0;
+                        }
+                        current_op = Some(op);
+                        op_count += count;
+                        pos1 += count;
+                        pos2 += count;
+                    }
+                    _ => {}
                 }
-                
-                // Accumulate counts for the same operation
-                current_op = Some(op);
-                op_count += count;
                 count = 0;
             }
         }
@@ -598,17 +682,15 @@ impl SeqRush {
         result
     }
     
-    fn parse_cigar_for_paf(&self, cigar: &str, query_len: usize, target_len: usize, is_reverse: bool) 
+    fn parse_cigar_for_paf(&self, cigar: &str, query_len: usize, target_len: usize, _is_reverse: bool) 
         -> (usize, usize, usize, usize, usize, usize) {
-        let mut query_pos = 0;
-        let mut target_pos = 0;
+        // Parse CIGAR to count matches and calculate consumed bases
+        // For WFA2 global alignments, we align entire sequences
+        
         let mut num_matches = 0;
         let mut count = 0;
-        
-        // Track start positions (first match position)
-        let mut query_start = 0;
-        let mut target_start = 0;
-        let mut found_first_match = false;
+        let mut _query_consumed = 0;
+        let mut _target_consumed = 0;
         
         for ch in cigar.chars() {
             if ch.is_ascii_digit() {
@@ -618,30 +700,21 @@ impl SeqRush {
                 
                 match ch {
                     'M' | '=' => {
-                        if !found_first_match {
-                            query_start = query_pos;
-                            target_start = target_pos;
-                            found_first_match = true;
-                        }
-                        // For --eqx style, = means match
                         num_matches += count;
-                        query_pos += count;
-                        target_pos += count;
+                        _query_consumed += count;
+                        _target_consumed += count;
                     }
                     'X' => {
-                        if !found_first_match {
-                            query_start = query_pos;
-                            target_start = target_pos;
-                            found_first_match = true;
-                        }
-                        query_pos += count;
-                        target_pos += count;
+                        _query_consumed += count;
+                        _target_consumed += count;
                     }
                     'I' => {
-                        query_pos += count;
+                        // Insertion in target
+                        _target_consumed += count;
                     }
                     'D' => {
-                        target_pos += count;
+                        // Deletion from target (present in query)
+                        _query_consumed += count;
                     }
                     _ => {}
                 }
@@ -649,18 +722,16 @@ impl SeqRush {
             }
         }
         
-        // For PAF format, coordinates are always in forward strand
-        // is_reverse only affects the strand field, not the coordinates
-        let (final_target_start, final_target_end) = (target_start, target_pos);
+        // For global alignments, we report the full sequence ranges
+        let query_start = 0;
+        let query_end = query_len;
+        let target_start = 0;
+        let target_end = target_len;
         
-        // Ensure coordinates are within bounds
-        let query_end = query_pos.min(query_len);
-        let target_end = final_target_end.min(target_len);
+        // Block length is the target sequence length
+        let block_length = target_len;
         
-        // Block length is the alignment length
-        let block_length = (query_end - query_start).max(target_end - final_target_start);
-        
-        (query_start, query_end, final_target_start, target_end, num_matches, block_length)
+        (query_start, query_end, target_start, target_end, num_matches, block_length)
     }
     
     fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
