@@ -7,9 +7,10 @@ use std::io::{BufWriter, Write, BufRead, BufReader};
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::sync::Mutex;
-use uf_rush::UFRush;
 use lib_wfa2::affine_wavefront::{AffineWavefronts, MemoryMode, AlignmentStatus};
 use crate::graph_ops::{Graph, Node, Edge};
+use crate::bidirected_union_find::BidirectedUnionFind;
+use crate::pos::{Pos, make_pos};
 
 #[derive(Parser)]
 #[command(name = "seqrush", version = "0.4.0", about = "Dynamic pangenome graph construction")]
@@ -186,14 +187,14 @@ impl Sequence {
 pub struct SeqRush {
     pub sequences: Vec<Sequence>,
     pub total_length: usize,
-    pub union_find: Arc<UFRush>,
+    pub union_find: BidirectedUnionFind,
     pub sparsity_threshold: u64,
 }
 
 impl SeqRush {
     pub fn new(sequences: Vec<Sequence>, sparsity_threshold: u64) -> Self {
         let total_length = sequences.iter().map(|s| s.data.len()).sum();
-        let union_find = Arc::new(UFRush::new(total_length));
+        let union_find = BidirectedUnionFind::new(total_length);
         
         Self {
             sequences,
@@ -357,10 +358,14 @@ impl SeqRush {
         };
         wf.set_memory_mode(MemoryMode::Ultralow);
         
+        // Set alignment span to End2End (like wfmash)
+        wf.set_alignment_span(lib_wfa2::affine_wavefront::AlignmentSpan::End2End);
+        
         // Perform alignment in the chosen orientation
+        // WFA2 expects (pattern, text) where pattern=target, text=query (like wfmash)
         let (status, score, is_reverse) = if use_reverse {
             // Forward-reverse alignment
-            let status = wf.align(&seq1.data, &seq2_rc);
+            let status = wf.align(&seq2_rc, &seq1.data);
             let score = if matches!(status, AlignmentStatus::Completed) {
                 wf.score().abs()
             } else {
@@ -369,7 +374,7 @@ impl SeqRush {
             (status, score, true)
         } else {
             // Forward-forward alignment
-            let status = wf.align(&seq1.data, &seq2.data);
+            let status = wf.align(&seq2.data, &seq1.data);
             let score = if matches!(status, AlignmentStatus::Completed) {
                 wf.score().abs()
             } else {
@@ -405,11 +410,11 @@ impl SeqRush {
                 self.write_paf_record(writer, seq1, seq2, &cigar, score, is_reverse, &wf);
             }
             
-            self.process_alignment(&cigar, seq1, seq2, args.min_match_length, is_reverse);
+            self.process_alignment(&cigar, seq1, seq2, args.min_match_length, is_reverse, args.verbose);
         }
     }
     
-    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, seq2_is_rc: bool) {
+    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, seq2_is_rc: bool, _verbose: bool) {
         let mut pos1 = 0;
         let mut pos2 = 0;
         let mut count = 0;
@@ -420,6 +425,13 @@ impl SeqRush {
         let mut match_run_start2 = 0;
         let mut match_run_len = 0;
         
+        // If seq2 was reverse complemented for alignment, we need to compare against the RC
+        let seq2_data = if seq2_is_rc {
+            seq2.reverse_complement()
+        } else {
+            seq2.data.clone()
+        };
+        
         for ch in cigar.chars() {
             if ch.is_ascii_digit() {
                 count = count * 10 + (ch as usize - '0' as usize);
@@ -428,35 +440,51 @@ impl SeqRush {
                 
                 match ch {
                     'M' | '=' => {
+                        // if verbose {
+                        //     println!("    Processing {}M operation at pos1={}, pos2={}", count, pos1, pos2);
+                        // }
                         // For 'M' operations, we need to check if bases actually match
                         // since 'M' can represent either match or mismatch
                         
                         // Check all positions in this M operation
                         for k in 0..count {
-                            if pos1 + k < seq1.data.len() && pos2 + k < seq2.data.len() {
-                                if seq1.data[pos1 + k] == seq2.data[pos2 + k] {
+                            if pos1 + k < seq1.data.len() && pos2 + k < seq2_data.len() {
+                                let base1 = seq1.data[pos1 + k];
+                                let base2 = seq2_data[pos2 + k];
+                                // if verbose && k < 3 {
+                                //     println!("      pos {}+{}: {} vs {} = {}", pos1, k, base1 as char, base2 as char, base1 == base2);
+                                // }
+                                if base1 == base2 {
                                     // Bases match - extend or start match run
                                     if !in_match_run {
                                         in_match_run = true;
                                         match_run_start1 = pos1 + k;
                                         match_run_start2 = pos2 + k;
                                         match_run_len = 1;
+                                        // if verbose {
+                                        //     println!("      Starting match run at pos1={}, pos2={}", match_run_start1, match_run_start2);
+                                        // }
                                     } else {
                                         match_run_len += 1;
                                     }
                                 } else {
                                     // Mismatch - process any accumulated match run
                                     if in_match_run && match_run_len >= min_match_len {
-                                        for j in 0..match_run_len {
-                                            let global_pos1 = seq1.offset + match_run_start1 + j;
-                                            let global_pos2 = if seq2_is_rc {
-                                                // Map reverse complement position back to forward strand
-                                                seq2.offset + (seq2.data.len() - 1 - (match_run_start2 + j))
-                                            } else {
-                                                seq2.offset + match_run_start2 + j
-                                            };
-                                            self.union_find.unite(global_pos1, global_pos2);
-                                        }
+                                        // if verbose {
+                                        //     println!("    Uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
+                                        //             match_run_start1, match_run_start1 + match_run_len,
+                                        //             match_run_start2, match_run_start2 + match_run_len,
+                                        //             seq2_is_rc);
+                                        // }
+                                        self.union_find.unite_matching_region(
+                                            seq1.offset,
+                                            seq2.offset,
+                                            match_run_start1,
+                                            match_run_start2,
+                                            match_run_len,
+                                            seq2_is_rc,
+                                            seq2.data.len(),
+                                        );
                                     }
                                     in_match_run = false;
                                     match_run_len = 0;
@@ -470,16 +498,21 @@ impl SeqRush {
                     _ => {
                         // Not a match operation - process any accumulated match run
                         if in_match_run && match_run_len >= min_match_len {
-                            for j in 0..match_run_len {
-                                let global_pos1 = seq1.offset + match_run_start1 + j;
-                                let global_pos2 = if seq2_is_rc {
-                                    // Map reverse complement position back to forward strand
-                                    seq2.offset + (seq2.data.len() - 1 - (match_run_start2 + j))
-                                } else {
-                                    seq2.offset + match_run_start2 + j
-                                };
-                                self.union_find.unite(global_pos1, global_pos2);
-                            }
+                            // if verbose {
+                            //     println!("    Uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
+                            //             match_run_start1, match_run_start1 + match_run_len,
+                            //             match_run_start2, match_run_start2 + match_run_len,
+                            //             seq2_is_rc);
+                            // }
+                            self.union_find.unite_matching_region(
+                                seq1.offset,
+                                seq2.offset,
+                                match_run_start1,
+                                match_run_start2,
+                                match_run_len,
+                                seq2_is_rc,
+                                seq2.data.len(),
+                            );
                         }
                         in_match_run = false;
                         match_run_len = 0;
@@ -491,12 +524,12 @@ impl SeqRush {
                                 pos2 += count; 
                             }
                             'I' => { 
-                                // Insertion in reference/target
-                                pos2 += count; 
+                                // Insertion in query (seq1) relative to target (seq2)
+                                pos1 += count; 
                             }
                             'D' => { 
-                                // Deletion from reference, present in query
-                                pos1 += count; 
+                                // Deletion in query (seq1) relative to target (seq2)
+                                pos2 += count; 
                             }
                             _ => {}
                         }
@@ -507,17 +540,26 @@ impl SeqRush {
         }
         
         // Process final match run if alignment ends with matches
+        // if verbose {
+        //     println!("    End of CIGAR: in_match_run={}, match_run_len={}, min_match_len={}", 
+        //             in_match_run, match_run_len, min_match_len);
+        // }
         if in_match_run && match_run_len >= min_match_len {
-            for j in 0..match_run_len {
-                let global_pos1 = seq1.offset + match_run_start1 + j;
-                let global_pos2 = if seq2_is_rc {
-                    // Map reverse complement position back to forward strand
-                    seq2.offset + (seq2.data.len() - 1 - (match_run_start2 + j))
-                } else {
-                    seq2.offset + match_run_start2 + j
-                };
-                self.union_find.unite(global_pos1, global_pos2);
-            }
+            // if verbose {
+            //     println!("    Final uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
+            //             match_run_start1, match_run_start1 + match_run_len,
+            //             match_run_start2, match_run_start2 + match_run_len,
+            //             seq2_is_rc);
+            // }
+            self.union_find.unite_matching_region(
+                seq1.offset,
+                seq2.offset,
+                match_run_start1,
+                match_run_start2,
+                match_run_len,
+                seq2_is_rc,
+                seq2.data.len(),
+            );
         }
     }
     
@@ -561,16 +603,19 @@ impl SeqRush {
     
     fn convert_to_eqx_cigar(&self, cigar: &str, seq1: &[u8], seq2: &[u8], is_reverse: bool) -> String {
         // Convert M operations to =/X for matches/mismatches (--eqx style) and compact the CIGAR
-        // We need to walk through the alignment to determine if M operations are matches or mismatches
+        // Note: WFA2 was called with (target, query) order, so:
+        // - seq1 is query sequence
+        // - seq2 is target sequence
+        // - CIGAR operations are relative to pattern (target)
         let mut result = String::new();
         let mut count = 0;
         let mut current_op: Option<char> = None;
         let mut op_count = 0;
         
-        let mut pos1 = 0;
-        let mut pos2 = 0;
+        let mut pos_target = 0;
+        let mut pos_query = 0;
         
-        // If reverse, we're comparing seq1 to reverse complement of seq2
+        // If reverse, we're comparing query to reverse complement of target
         let seq2_data = if is_reverse {
             let mut rc = seq2.to_vec();
             rc.reverse();
@@ -598,7 +643,7 @@ impl SeqRush {
                     'M' => {
                         // For M operations, check each position to see if it's a match or mismatch
                         for _ in 0..count {
-                            let op = if pos1 < seq1.len() && pos2 < seq2_data.len() && seq1[pos1] == seq2_data[pos2] {
+                            let op = if pos_query < seq1.len() && pos_target < seq2_data.len() && seq1[pos_query] == seq2_data[pos_target] {
                                 '='
                             } else {
                                 'X'
@@ -613,12 +658,12 @@ impl SeqRush {
                             current_op = Some(op);
                             op_count += 1;
                             
-                            pos1 += 1;
-                            pos2 += 1;
+                            pos_query += 1;
+                            pos_target += 1;
                         }
                     }
                     'I' => {
-                        // Insertion in target
+                        // Insertion: extra bases in text (query) relative to pattern (target)
                         let op = 'I';
                         if current_op.is_some() && current_op != Some(op) {
                             result.push_str(&op_count.to_string());
@@ -627,10 +672,10 @@ impl SeqRush {
                         }
                         current_op = Some(op);
                         op_count += count;
-                        pos2 += count;
+                        pos_query += count;
                     }
                     'D' => {
-                        // Deletion from target
+                        // Deletion: extra bases in pattern (target) relative to text (query)
                         let op = 'D';
                         if current_op.is_some() && current_op != Some(op) {
                             result.push_str(&op_count.to_string());
@@ -639,7 +684,7 @@ impl SeqRush {
                         }
                         current_op = Some(op);
                         op_count += count;
-                        pos1 += count;
+                        pos_target += count;
                     }
                     'X' => {
                         // Already a mismatch
@@ -651,8 +696,8 @@ impl SeqRush {
                         }
                         current_op = Some(op);
                         op_count += count;
-                        pos1 += count;
-                        pos2 += count;
+                        pos_query += count;
+                        pos_target += count;
                     }
                     '=' => {
                         // Already a match
@@ -664,8 +709,8 @@ impl SeqRush {
                         }
                         current_op = Some(op);
                         op_count += count;
-                        pos1 += count;
-                        pos2 += count;
+                        pos_query += count;
+                        pos_target += count;
                     }
                     _ => {}
                 }
@@ -709,12 +754,12 @@ impl SeqRush {
                         _target_consumed += count;
                     }
                     'I' => {
-                        // Insertion in target
-                        _target_consumed += count;
+                        // Insertion in query relative to target
+                        _query_consumed += count;
                     }
                     'D' => {
-                        // Deletion from target (present in query)
-                        _query_consumed += count;
+                        // Deletion in query relative to target
+                        _target_consumed += count;
                     }
                     _ => {}
                 }
@@ -834,7 +879,7 @@ impl SeqRush {
         let mut graph = Graph::new();
         
         // Track which unions we've seen and their node IDs
-        let mut union_to_node: HashMap<usize, usize> = HashMap::new();
+        let mut union_to_node: HashMap<Pos, usize> = HashMap::new();
         let mut next_node_id = 1;
         
         // Build paths and discover nodes
@@ -842,35 +887,42 @@ impl SeqRush {
             let mut path = Vec::new();
             
             for i in 0..seq.data.len() {
-                let global_pos = seq.offset + i;
-                let union = self.union_find.find(global_pos);
+                // Create bidirectional position (always forward for path traversal)
+                let pos = make_pos(seq.offset + i, false);
+                let union_rep = self.union_find.find(pos);
                 
-                // Get or create node ID for this union
-                let node_id = match union_to_node.get(&union) {
+                // if verbose {
+                //     eprintln!("DEBUG: seq {} pos {} -> union_rep {} (offset={}, rev={})", 
+                //              seq.id, seq.offset + i, union_rep, union_rep >> 1, union_rep & 1);
+                // }
+                
+                // Get or create node ID for this union representative
+                let node_id = match union_to_node.get(&union_rep) {
                     Some(&id) => {
-                        // Node already exists - extend its sequence if this character is different
+                        // Node already exists - verify consistency
                         if let Some(node) = graph.nodes.get_mut(&id) {
-                            // If this is a new character in the same union, extend the node's sequence
-                            if node.sequence.is_empty() || node.sequence[node.sequence.len() - 1] != seq.data[i] {
-                                // Character differs from last in node - this is expected in bidirectional graphs
-                                // when positions from different strands are united
-                                if !node.sequence.is_empty() && node.sequence[0] != seq.data[i] {
-                                    if verbose {
-                                        eprintln!("INFO: Union {} contains multiple characters: {} and {} (expected for bidirectional graph)", 
-                                                 union, node.sequence[0] as char, seq.data[i] as char);
-                                    }
+                            // Check if the base matches what we expect
+                            let current_base = seq.data[i];
+                            if !node.sequence.is_empty() && node.sequence[0] != current_base {
+                                // This can happen when forward and reverse complement positions
+                                // are united - we need to choose a canonical representation
+                                if verbose {
+                                    eprintln!("INFO: Union representative {} contains positions with different bases: {} and {} (choosing first)", 
+                                             union_rep, node.sequence[0] as char, current_base as char);
                                 }
-                                // Keep the first character we saw for this union
-                                // In a proper bidirectional graph implementation, we'd track both
+                                // Keep the first base we saw for this union
+                            } else if node.sequence.is_empty() {
+                                // Initialize with this base
+                                node.sequence = vec![current_base];
                             }
                         }
                         id
                     }
                     None => {
-                        // First time seeing this union - create node
+                        // First time seeing this union representative - create node
                         let id = next_node_id;
                         next_node_id += 1;
-                        union_to_node.insert(union, id);
+                        union_to_node.insert(union_rep, id);
                         
                         // Create node with single character sequence
                         let node = Node {

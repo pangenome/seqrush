@@ -282,8 +282,8 @@ mod reverse_complement_tests {
         println!("Reverse seq: {}", reverse_str);
         println!("Node count with RC sequence: {}", node_count);
         
-        // With the bug, we expect many nodes (close to 2x sequence length)
-        // With proper handling, we'd expect around sequence length
-        assert!(node_count > 20, "Expected many nodes due to unhandled RC");
+        // With proper RC handling, we should have around sequence length nodes
+        // The old bug would create many nodes (close to 2x sequence length)
+        assert!(node_count <= 20, "Expected few nodes with proper RC handling, got {}", node_count);
     }
 }
