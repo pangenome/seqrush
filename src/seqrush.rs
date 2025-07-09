@@ -598,7 +598,7 @@ impl SeqRush {
         result
     }
     
-    fn parse_cigar_for_paf(&self, cigar: &str, _query_len: usize, target_len: usize, is_reverse: bool) 
+    fn parse_cigar_for_paf(&self, cigar: &str, query_len: usize, target_len: usize, is_reverse: bool) 
         -> (usize, usize, usize, usize, usize, usize) {
         let mut query_pos = 0;
         let mut target_pos = 0;
@@ -649,17 +649,18 @@ impl SeqRush {
             }
         }
         
-        // For reverse strand, adjust target coordinates
-        let (final_target_start, final_target_end) = if is_reverse {
-            (target_len - target_pos, target_len - target_start)
-        } else {
-            (target_start, target_pos)
-        };
+        // For PAF format, coordinates are always in forward strand
+        // is_reverse only affects the strand field, not the coordinates
+        let (final_target_start, final_target_end) = (target_start, target_pos);
         
-        // Block length is the span in both query and target
-        let block_length = query_pos.max(target_pos);
+        // Ensure coordinates are within bounds
+        let query_end = query_pos.min(query_len);
+        let target_end = final_target_end.min(target_len);
         
-        (query_start, query_pos, final_target_start, final_target_end, num_matches, block_length)
+        // Block length is the alignment length
+        let block_length = (query_end - query_start).max(target_end - final_target_start);
+        
+        (query_start, query_end, final_target_start, target_end, num_matches, block_length)
     }
     
     fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -920,7 +921,8 @@ pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::err
                 offset += current_data.len();
                 current_data.clear();
             }
-            current_id = line[1..].trim().to_string();
+            // Only take the first word (before any whitespace) as the sequence ID
+            current_id = line[1..].trim().split_whitespace().next().unwrap_or("").to_string();
         } else {
             current_data.extend(line.trim().bytes());
         }
