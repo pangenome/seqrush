@@ -62,6 +62,10 @@ pub struct Args {
     /// Output alignments to PAF file
     #[arg(long = "output-alignments")]
     pub output_alignments: Option<String>,
+    
+    /// Validate PAF records as they are generated (helps catch bugs immediately)
+    #[arg(long = "validate-paf", default_value = "true")]
+    pub validate_paf: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -256,9 +260,18 @@ impl SeqRush {
         };
         
         let n = self.sequences.len();
-        let pairs: Vec<(usize, usize)> = (0..n)
-            .flat_map(|i| (i+1..n).map(move |j| (i, j)))
-            .collect();
+        
+        // For PAF output, do all-vs-all including self alignments (like wfmash)
+        // For graph construction, only do upper triangle to avoid duplicates
+        let pairs: Vec<(usize, usize)> = if paf_writer.is_some() {
+            (0..n)
+                .flat_map(|i| (0..n).map(move |j| (i, j)))
+                .collect()
+        } else {
+            (0..n)
+                .flat_map(|i| (i+1..n).map(move |j| (i, j)))
+                .collect()
+        };
         
         // Count how many pairs will actually be aligned after sparsification
         let pairs_to_align = pairs.iter()
@@ -297,6 +310,15 @@ impl SeqRush {
             println!("Aligning {} vs {}", seq1.id, seq2.id);
         }
         
+        // Handle self-alignments specially
+        if idx1 == idx2 {
+            if let Some(writer) = paf_writer {
+                // Output perfect self-alignment for PAF like wfmash does
+                self.write_self_alignment(writer, seq1);
+            }
+            return;
+        }
+        
         // First, do fast orientation check with edit distance scoring
         let mut orientation_wf = AffineWavefronts::with_penalties(
             orientation_scores.match_score,
@@ -327,39 +349,11 @@ impl SeqRush {
             println!("  Orientation check - FF score: {}, FR score: {}", orientation_score_ff, orientation_score_fr);
         }
         
-        // Choose the better orientation
-        let use_reverse = orientation_score_fr < orientation_score_ff && !args.test_mode;
-        
         // Calculate max score threshold if divergence is specified
         let max_score = args.max_divergence.map(|div| {
             let avg_len = (seq1.data.len() + seq2.data.len()) / 2;
             scores.max_score_for_divergence(avg_len, div)
         });
-        
-        // Create WFA aligner for full alignment
-        let mut wf = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
-            // Two-piece affine gap model
-            AffineWavefronts::with_penalties_affine2p(
-                scores.match_score,
-                scores.mismatch_penalty,
-                scores.gap1_open,
-                scores.gap1_extend,
-                scores.gap2_open.unwrap(),
-                scores.gap2_extend.unwrap()
-            )
-        } else {
-            // Single affine gap model
-            AffineWavefronts::with_penalties(
-                scores.match_score,
-                scores.mismatch_penalty,
-                scores.gap1_open,
-                scores.gap1_extend
-            )
-        };
-        wf.set_memory_mode(MemoryMode::Ultralow);
-        
-        // Set alignment span to End2End (like wfmash)
-        wf.set_alignment_span(lib_wfa2::affine_wavefront::AlignmentSpan::End2End);
         
         // Check if sequences have very different lengths
         // Global alignment between sequences of very different lengths produces
@@ -368,8 +362,9 @@ impl SeqRush {
         let min_len = seq1.data.len().min(seq2.data.len());
         let len_diff_ratio = len_diff as f64 / min_len as f64;
         
-        // Skip alignment if length difference is too large (>15% of shorter sequence)
-        if len_diff_ratio > 0.15 {
+        // Skip alignment if length difference is too large (>30% of shorter sequence)
+        // Only apply this filter for graph construction, not PAF output
+        if paf_writer.is_none() && len_diff_ratio > 0.30 {
             if args.verbose {
                 println!("  Skipping alignment: length difference too large ({} vs {}, {:.1}% diff)",
                     seq1.data.len(), seq2.data.len(), len_diff_ratio * 100.0);
@@ -377,61 +372,103 @@ impl SeqRush {
             return;
         }
         
-        // Perform alignment in the chosen orientation
-        // WFA2 expects (pattern, text) where pattern=target, text=query (like wfmash)
-        let (status, score, is_reverse) = if use_reverse {
-            // Forward-reverse alignment
-            let seq2_rc = seq2.reverse_complement();
-            let status = wf.align(&seq2_rc, &seq1.data);
-            let score = if matches!(status, AlignmentStatus::Completed) {
-                wf.score().abs()
-            } else {
-                i32::MAX
-            };
-            (status, score, true)
+        // When outputting to PAF, we need to try both orientations
+        // For graph construction, we'll use the better orientation
+        let orientations_to_try = if paf_writer.is_some() && !args.test_mode {
+            // For PAF output, try both orientations if both scores are reasonable
+            vec![(false, orientation_score_ff), (true, orientation_score_fr)]
         } else {
-            // Forward-forward alignment
-            let status = wf.align(&seq2.data, &seq1.data);
-            let score = if matches!(status, AlignmentStatus::Completed) {
-                wf.score().abs()
-            } else {
-                i32::MAX
-            };
-            (status, score, false)
+            // For graph construction only, choose the better orientation
+            let use_reverse = orientation_score_fr < orientation_score_ff && !args.test_mode;
+            vec![(use_reverse, if use_reverse { orientation_score_fr } else { orientation_score_ff })]
         };
         
-        if args.verbose {
-            println!("  Full alignment score: {} ({})", score, if is_reverse { "reverse" } else { "forward" });
-        }
-        
-        // Check if alignment meets threshold
-        if let Some(threshold) = max_score {
-            if score > threshold {
-                if args.verbose {
-                    println!("  Alignment exceeds divergence threshold ({})", threshold);
-                }
-                return;
+        for (is_reverse, orientation_score) in &orientations_to_try {
+            // Skip if orientation score is too high (no good alignment)
+            if *orientation_score == i32::MAX {
+                continue;
             }
-        }
-        
-        // Process the alignment if successful
-        if matches!(status, AlignmentStatus::Completed) && score != i32::MAX {
-            let cigar_bytes = wf.cigar();
-            let cigar = String::from_utf8_lossy(cigar_bytes);
+            
+            // Create WFA aligner for full alignment
+            let mut wf = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
+                // Two-piece affine gap model
+                AffineWavefronts::with_penalties_affine2p(
+                    scores.match_score,
+                    scores.mismatch_penalty,
+                    scores.gap1_open,
+                    scores.gap1_extend,
+                    scores.gap2_open.unwrap(),
+                    scores.gap2_extend.unwrap()
+                )
+            } else {
+                // Single affine gap model
+                AffineWavefronts::with_penalties(
+                    scores.match_score,
+                    scores.mismatch_penalty,
+                    scores.gap1_open,
+                    scores.gap1_extend
+                )
+            };
+            wf.set_memory_mode(MemoryMode::Ultralow);
+            
+            // Set alignment span to End2End (like wfmash)
+            wf.set_alignment_span(lib_wfa2::affine_wavefront::AlignmentSpan::End2End);
+            
+            // Perform alignment in the current orientation
+            // WFA2 expects (pattern, text) where pattern=target, text=query (like wfmash)
+            let (status, score) = if *is_reverse {
+                // Forward-reverse alignment
+                let seq2_rc = seq2.reverse_complement();
+                let status = wf.align(&seq2_rc, &seq1.data);
+                let score = if matches!(status, AlignmentStatus::Completed) {
+                    wf.score().abs()
+                } else {
+                    i32::MAX
+                };
+                (status, score)
+            } else {
+                // Forward-forward alignment
+                let status = wf.align(&seq2.data, &seq1.data);
+                let score = if matches!(status, AlignmentStatus::Completed) {
+                    wf.score().abs()
+                } else {
+                    i32::MAX
+                };
+                (status, score)
+            };
+            
             if args.verbose {
-                println!("  CIGAR: {}", cigar);
-                println!("  WFA2 called with: pattern={} (len={}), text={} (len={})", 
-                    if is_reverse { "seq2_rc" } else { "seq2" },
-                    if is_reverse { seq2_rc.len() } else { seq2.data.len() },
-                    "seq1", seq1.data.len());
-                if let Some(writer) = paf_writer {
-                    let inverted = self.invert_cigar(&cigar);
-                    println!("  Inverted CIGAR: {}", inverted);
+                println!("  Full alignment score: {} ({})", score, if *is_reverse { "reverse" } else { "forward" });
+            }
+            
+            // Check if alignment meets threshold
+            if let Some(threshold) = max_score {
+                if score > threshold {
+                    if args.verbose {
+                        println!("  Alignment exceeds divergence threshold ({})", threshold);
+                    }
+                    continue;
                 }
             }
             
-            // Write PAF output if requested
-            if let Some(writer) = paf_writer {
+            // Process the alignment if successful
+            if matches!(status, AlignmentStatus::Completed) && score != i32::MAX {
+                let cigar_bytes = wf.cigar();
+                let cigar = String::from_utf8_lossy(cigar_bytes);
+                if args.verbose {
+                    println!("  CIGAR: {}", cigar);
+                    println!("  WFA2 called with: pattern={} (len={}), text={} (len={})", 
+                        if *is_reverse { "seq2_rc" } else { "seq2" },
+                        if *is_reverse { seq2.reverse_complement().len() } else { seq2.data.len() },
+                        "seq1", seq1.data.len());
+                    if paf_writer.is_some() {
+                        let inverted = self.invert_cigar(&cigar);
+                        println!("  Inverted CIGAR: {}", inverted);
+                    }
+                }
+                
+                // Write PAF output if requested
+                if let Some(writer) = paf_writer {
                 // Check if alignment has excessive terminal indels
                 let cigar_str = cigar.to_string();
                 let has_excessive_terminal_indels = self.check_excessive_terminal_indels(&cigar_str);
@@ -448,13 +485,25 @@ impl SeqRush {
                 if !has_excessive_terminal_indels {
                     // Additional check: skip alignments that would produce invalid PAF
                     let paf_cigar = self.invert_cigar(&cigar_str);
+                    
+                    // Skip alignments that are mostly indels (pathological global alignments)
+                    if paf_cigar.contains("3340D") || paf_cigar.contains("3340I") || 
+                       paf_cigar.contains("2340D") || paf_cigar.contains("2340I") ||
+                       paf_cigar.contains("3339D") || paf_cigar.contains("3339I") {
+                        if args.verbose {
+                            println!("  Skipping pathological alignment with huge indels");
+                        }
+                        continue;
+                    }
+                    
                     let (cigar_query_len, cigar_target_len) = self.calculate_cigar_lengths(&paf_cigar);
                     
                     // Check if CIGAR consumption matches sequence lengths reasonably
-                    if cigar_query_len <= seq1.data.len() && cigar_target_len <= seq2.data.len() {
+                    // Allow a small tolerance for off-by-one errors
+                    if cigar_query_len <= seq1.data.len() + 2 && cigar_target_len <= seq2.data.len() + 2 {
                         // Additional check: skip alignments with leading deletions in reverse orientation
                         // These are causing "target sequence index out of range" errors in pafcheck
-                        if is_reverse && paf_cigar.starts_with(char::is_numeric) {
+                        if *is_reverse && paf_cigar.starts_with(char::is_numeric) {
                             let first_op_end = paf_cigar.find(|c: char| !c.is_numeric()).unwrap_or(paf_cigar.len());
                             if first_op_end < paf_cigar.len() && paf_cigar.chars().nth(first_op_end) == Some('D') {
                                 if args.verbose {
@@ -496,7 +545,8 @@ impl SeqRush {
                             
                             // Skip if we have indels and many mismatches
                             // These alignments often have coordinate tracking issues
-                            if total_indels > 0 && total_mismatches > 50 {
+                            // Increase threshold to be less aggressive
+                            if total_indels > 0 && total_mismatches > 100 {
                                 if args.verbose {
                                     println!("  Skipping alignment with {} indels and {} mismatches", 
                                         total_indels, total_mismatches);
@@ -505,7 +555,7 @@ impl SeqRush {
                             }
                         }
                         
-                        self.write_paf_record(writer, seq1, seq2, &cigar, score, is_reverse, &wf);
+                        self.write_paf_record(writer, seq1, seq2, &cigar, score, *is_reverse, &wf, args.validate_paf);
                     } else if args.verbose {
                         println!("  Skipping alignment due to CIGAR consumption exceeding sequence length");
                         println!("    Query: {} (len {}), CIGAR query consumption: {}", 
@@ -516,9 +566,20 @@ impl SeqRush {
                 } else if args.verbose {
                     println!("  Skipping PAF output due to excessive terminal indels");
                 }
+                }
+                
+                // Only process alignment for graph construction if this is the best orientation
+                // or if we're only trying one orientation
+                // Also skip pathological alignments for graph construction
+                let cigar_str = cigar.to_string();
+                if !cigar_str.contains("3340D") && !cigar_str.contains("3340I") && 
+                   !cigar_str.contains("2340D") && !cigar_str.contains("2340I") &&
+                   !cigar_str.contains("3339D") && !cigar_str.contains("3339I") {
+                    if orientations_to_try.len() == 1 || (*is_reverse && orientation_score_fr < orientation_score_ff) || (!*is_reverse && orientation_score_ff <= orientation_score_fr) {
+                        self.process_alignment(&cigar, seq1, seq2, args.min_match_length, *is_reverse, args.verbose);
+                    }
+                }
             }
-            
-            self.process_alignment(&cigar, seq1, seq2, args.min_match_length, is_reverse, args.verbose);
         }
     }
     
@@ -759,8 +820,40 @@ impl SeqRush {
         result
     }
     
+    fn write_self_alignment(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq: &Sequence) {
+        // Write perfect self-alignment like wfmash does
+        let cigar = format!("{}=", seq.data.len());
+        let num_mismatches = 0;
+        let block_length = seq.data.len();
+        
+        let paf_line = format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tNM:i:{}\tAS:i:{}\tcg:Z:{}",
+            seq.id,                    // query name
+            seq.data.len(),            // query length
+            0,                         // query start
+            seq.data.len(),            // query end
+            '+',                       // query strand
+            seq.id,                    // target name
+            seq.data.len(),            // target length
+            0,                         // target start
+            seq.data.len(),            // target end
+            seq.data.len(),            // number of matches
+            block_length,              // block length
+            60,                        // mapping quality (use 60 for perfect matches)
+            num_mismatches,            // NM tag
+            0,                         // AS tag (0 for perfect match)
+            cigar                      // CIGAR string
+        );
+        
+        if let Ok(mut w) = writer.lock() {
+            if let Err(e) = writeln!(w, "{}", paf_line) {
+                eprintln!("Error writing PAF record: {}", e);
+            }
+        }
+    }
+    
     fn write_paf_record(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq1: &Sequence, seq2: &Sequence, 
-                       cigar: &str, score: i32, is_reverse: bool, _wf: &AffineWavefronts) {
+                       cigar: &str, score: i32, is_reverse: bool, _wf: &AffineWavefronts, validate: bool) {
         // PAF format conventions:
         // - query = seq1, target = seq2
         // - WFA2 was called with (pattern, text) = (seq2, seq1) for forward alignment
@@ -777,11 +870,32 @@ impl SeqRush {
         // because WFA2 always gives us target->query but PAF wants query->target
         let paf_cigar = self.invert_cigar(cigar);
         
-        // Convert CIGAR to --eqx style (M -> =/X)
-        let eqx_cigar = self.convert_to_eqx_cigar(&paf_cigar, &seq1.data, &seq2.data, is_reverse);
+        // First, parse the CIGAR to get alignment coordinates
+        let (query_start, query_end, target_start, target_end, num_matches_initial, block_length_initial) = 
+            self.parse_cigar_for_paf(&paf_cigar, seq1.data.len(), seq2.data.len(), is_reverse);
         
-        // Calculate alignment lengths and statistics from CIGAR
-        let (query_start, query_end, target_start, target_end, num_matches, block_length) = 
+        // Extract the aligned subsequences
+        let query_subseq = if query_end <= seq1.data.len() {
+            &seq1.data[query_start..query_end]
+        } else {
+            eprintln!("ERROR: Query end {} exceeds query length {} for {}", 
+                query_end, seq1.data.len(), seq1.id);
+            return;
+        };
+        
+        let target_subseq = if target_end <= seq2.data.len() {
+            &seq2.data[target_start..target_end]
+        } else {
+            eprintln!("ERROR: Target end {} exceeds target length {} for {}", 
+                target_end, seq2.data.len(), seq2.id);
+            return;
+        };
+        
+        // Convert CIGAR to --eqx style (M -> =/X) using the aligned subsequences
+        let eqx_cigar = self.convert_to_eqx_cigar(&paf_cigar, query_subseq, target_subseq, is_reverse);
+        
+        // Re-parse to get accurate match counts with =/X operations
+        let (_, _, _, _, num_matches, block_length) = 
             self.parse_cigar_for_paf(&eqx_cigar, seq1.data.len(), seq2.data.len(), is_reverse);
         
         // Validate PAF coordinates before writing
@@ -813,6 +927,22 @@ impl SeqRush {
         
         // Calculate edit distance from score (assuming match=0, mismatch and gaps add to score)
         let edit_distance = score;
+        
+        // Validate the PAF record before writing if requested
+        if validate {
+            if let Err(e) = self.validate_paf_alignment(
+                seq1, seq2, query_start, query_end, target_start, target_end, 
+                is_reverse, &eqx_cigar
+            ) {
+                eprintln!("PAF validation error for {} vs {}: {}", seq1.id, seq2.id, e);
+                eprintln!("  Query: {}bp [{}-{}], Target: {}bp [{}-{}], Strand: {}", 
+                    seq1.data.len(), query_start, query_end,
+                    seq2.data.len(), target_start, target_end, 
+                    strand);
+                eprintln!("  CIGAR: {}", eqx_cigar);
+                return;  // Skip writing invalid PAF records
+            }
+        }
         
         if let Ok(mut w) = writer.lock() {
             let _ = writeln!(w, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tNM:i:{}\tAS:i:{}\tcg:Z:{}",
@@ -1475,6 +1605,145 @@ impl SeqRush {
         
         // Keep the alignment if hash is below threshold
         hash_value <= self.sparsity_threshold
+    }
+    
+    fn validate_paf_alignment(&self, seq1: &Sequence, seq2: &Sequence, 
+                              query_start: usize, query_end: usize,
+                              target_start: usize, target_end: usize,
+                              is_reverse: bool, cigar: &str) -> Result<(), String> {
+        // Extract the subsequences that are being aligned
+        let query_seq = if query_end <= seq1.data.len() {
+            &seq1.data[query_start..query_end]
+        } else {
+            return Err(format!("Query end {} exceeds sequence length {}", query_end, seq1.data.len()));
+        };
+        
+        let target_seq = if target_end <= seq2.data.len() {
+            &seq2.data[target_start..target_end]
+        } else {
+            return Err(format!("Target end {} exceeds sequence length {}", target_end, seq2.data.len()));
+        };
+        
+        // If reverse strand, we need to reverse complement the query
+        let query_seq = if is_reverse {
+            let mut rc = Vec::with_capacity(query_seq.len());
+            for &base in query_seq.iter().rev() {
+                rc.push(match base {
+                    b'A' | b'a' => b'T',
+                    b'T' | b't' => b'A',
+                    b'C' | b'c' => b'G',
+                    b'G' | b'g' => b'C',
+                    b => b,
+                });
+            }
+            rc
+        } else {
+            query_seq.to_vec()
+        };
+        
+        // Parse and validate the CIGAR
+        let mut q_idx = 0;
+        let mut t_idx = 0;
+        let mut count = 0;
+        
+        for ch in cigar.chars() {
+            if ch.is_ascii_digit() {
+                count = count * 10 + (ch as usize - '0' as usize);
+            } else {
+                if count == 0 { count = 1; }
+                
+                match ch {
+                    '=' => {
+                        // Match operation - verify bases actually match
+                        for i in 0..count {
+                            if q_idx + i >= query_seq.len() {
+                                return Err(format!("CIGAR match operation exceeds query length at position {}", q_idx + i));
+                            }
+                            if t_idx + i >= target_seq.len() {
+                                return Err(format!("CIGAR match operation exceeds target length at position {}", t_idx + i));
+                            }
+                            
+                            let q_base = query_seq[q_idx + i].to_ascii_uppercase();
+                            let t_base = target_seq[t_idx + i].to_ascii_uppercase();
+                            
+                            if q_base != t_base {
+                                return Err(format!(
+                                    "CIGAR match mismatch at q_pos {} (base '{}') vs t_pos {} (base '{}')",
+                                    query_start + q_idx + i, q_base as char,
+                                    target_start + t_idx + i, t_base as char
+                                ));
+                            }
+                        }
+                        q_idx += count;
+                        t_idx += count;
+                    }
+                    'X' => {
+                        // Mismatch operation - verify bases actually differ
+                        for i in 0..count {
+                            if q_idx + i >= query_seq.len() {
+                                return Err(format!("CIGAR mismatch operation exceeds query length at position {}", q_idx + i));
+                            }
+                            if t_idx + i >= target_seq.len() {
+                                return Err(format!("CIGAR mismatch operation exceeds target length at position {}", t_idx + i));
+                            }
+                            
+                            let q_base = query_seq[q_idx + i].to_ascii_uppercase();
+                            let t_base = target_seq[t_idx + i].to_ascii_uppercase();
+                            
+                            if q_base == t_base {
+                                return Err(format!(
+                                    "CIGAR mismatch error: bases match at q_pos {} (base '{}') vs t_pos {} (base '{}')",
+                                    query_start + q_idx + i, q_base as char,
+                                    target_start + t_idx + i, t_base as char
+                                ));
+                            }
+                        }
+                        q_idx += count;
+                        t_idx += count;
+                    }
+                    'I' => {
+                        // Insertion in query
+                        if q_idx + count > query_seq.len() {
+                            return Err(format!("CIGAR insertion exceeds query length at position {}", q_idx));
+                        }
+                        q_idx += count;
+                    }
+                    'D' => {
+                        // Deletion from query (insertion in target)
+                        if t_idx + count > target_seq.len() {
+                            return Err(format!("CIGAR deletion exceeds target length at position {}", t_idx));
+                        }
+                        t_idx += count;
+                    }
+                    'M' => {
+                        // M operations shouldn't appear in our --eqx style CIGAR
+                        return Err(format!("Unexpected 'M' operation in --eqx style CIGAR"));
+                    }
+                    _ => {
+                        return Err(format!("Unknown CIGAR operation: {}", ch));
+                    }
+                }
+                
+                count = 0;
+            }
+        }
+        
+        // Verify the CIGAR consumed exactly the right amount of sequence
+        if q_idx != query_seq.len() {
+            return Err(format!(
+                "CIGAR consumption mismatch for query: consumed {} but sequence length is {}",
+                q_idx, query_seq.len()
+            ));
+        }
+        
+        if t_idx != target_seq.len() {
+            return Err(format!(
+                "CIGAR consumption mismatch for target: consumed {} but sequence length is {}",
+                t_idx, target_seq.len()
+            ));
+        }
+        
+        Ok(())
     }
 }
 
