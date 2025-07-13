@@ -118,23 +118,24 @@ impl SeqRushBidirectedSimple {
         
         // Create wavefront aligner
         let mut aligner = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
-            AffineWavefronts::with_penalties_affine2p(
+            AffineWavefronts::with_penalties_affine2p_and_memory_mode(
                 scores.match_score,
                 scores.mismatch_penalty,
                 scores.gap1_open,
                 scores.gap1_extend,
                 scores.gap2_open.unwrap(),
-                scores.gap2_extend.unwrap()
+                scores.gap2_extend.unwrap(),
+                MemoryMode::Ultralow
             )
         } else {
-            AffineWavefronts::with_penalties(
+            AffineWavefronts::with_penalties_and_memory_mode(
                 scores.match_score,
                 scores.mismatch_penalty,
                 scores.gap1_open,
-                scores.gap1_extend
+                scores.gap1_extend,
+                MemoryMode::Ultralow
             )
         };
-        aligner.set_memory_mode(MemoryMode::Ultralow);
         
         // Perform alignment
         let status = aligner.align(&pattern, &text);
