@@ -1,5 +1,5 @@
 use lib_wfa2::affine_wavefront::{
-    AffineWavefronts, AlignmentStatus, AlignmentScope, AlignmentSpan, MemoryMode, HeuristicStrategy
+    AffineWavefronts, AlignmentScope, AlignmentSpan, MemoryMode, HeuristicStrategy
 };
 
 /// Convert WFA2 CIGAR bytes to standard CIGAR string

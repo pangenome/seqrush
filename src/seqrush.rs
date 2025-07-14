@@ -4,14 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::fs::File;
 use std::io::{BufWriter, Write, BufRead, BufReader};
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use std::sync::Mutex;
-use lib_wfa2::affine_wavefront::AlignmentStatus;
 use crate::graph_ops::{Graph, Node, Edge};
 use crate::bidirected_union_find::BidirectedUnionFind;
 use crate::pos::{Pos, make_pos};
-use crate::wfa::{create_aligner, cigar_bytes_to_string};
+use allwave::{AllPairIterator, AlignmentParams, SparsificationStrategy};
 
 #[derive(Parser)]
 #[command(name = "seqrush", version = "0.4.0", about = "Dynamic pangenome graph construction")]
@@ -221,6 +218,11 @@ impl SeqRush {
     }
     
     pub fn align_and_unite(&self, args: &Args) {
+        // Use the new allwave-based implementation
+        self.align_and_unite_with_allwave(args);
+    }
+    
+    pub fn align_and_unite_with_allwave(&self, args: &Args) {
         // Parse alignment scores
         let scores = match AlignmentScores::parse(&args.scores) {
             Ok(s) => s,
@@ -241,8 +243,52 @@ impl SeqRush {
         
         if args.verbose {
             println!("Using alignment scores: {:?}", scores);
-            println!("Using orientation check scores: {:?}", orientation_scores);
+            println!("Using orientation scores: {:?}", orientation_scores);
         }
+        
+        // Convert sequences to allwave format
+        let allwave_sequences: Vec<allwave::Sequence> = self.sequences.iter()
+            .map(|s| allwave::Sequence {
+                id: s.id.clone(),
+                seq: s.data.clone(),
+            })
+            .collect();
+        
+        // Create alignment parameters
+        let params = AlignmentParams {
+            match_score: scores.match_score,
+            mismatch_penalty: scores.mismatch_penalty,
+            gap_open: scores.gap1_open,
+            gap_extend: scores.gap1_extend,
+            gap2_open: scores.gap2_open,
+            gap2_extend: scores.gap2_extend,
+            max_divergence: args.max_divergence,
+        };
+        
+        let orientation_params = AlignmentParams {
+            match_score: orientation_scores.match_score,
+            mismatch_penalty: orientation_scores.mismatch_penalty,
+            gap_open: orientation_scores.gap1_open,
+            gap_extend: orientation_scores.gap1_extend,
+            gap2_open: orientation_scores.gap2_open,
+            gap2_extend: orientation_scores.gap2_extend,
+            max_divergence: None,
+        };
+        
+        // Parse sparsification strategy
+        let sparsification = match args.sparsification.as_str() {
+            "1.0" => SparsificationStrategy::None,
+            "auto" => SparsificationStrategy::Auto,
+            s => {
+                match s.parse::<f64>() {
+                    Ok(factor) if factor > 0.0 && factor <= 1.0 => SparsificationStrategy::Random(factor),
+                    _ => {
+                        eprintln!("Invalid sparsification factor: {}. Using 1.0 (no sparsification)", s);
+                        SparsificationStrategy::None
+                    }
+                }
+            }
+        };
         
         // Create PAF writer if requested
         let paf_writer = if let Some(paf_path) = &args.output_alignments {
@@ -260,308 +306,56 @@ impl SeqRush {
             None
         };
         
-        let n = self.sequences.len();
-        
-        // For PAF output, do all-vs-all including self alignments (like wfmash)
-        // For graph construction, only do upper triangle to avoid duplicates
-        let pairs: Vec<(usize, usize)> = if paf_writer.is_some() {
-            (0..n)
-                .flat_map(|i| (0..n).map(move |j| (i, j)))
-                .collect()
-        } else {
-            (0..n)
-                .flat_map(|i| (i+1..n).map(move |j| (i, j)))
-                .collect()
-        };
-        
-        // Count how many pairs will actually be aligned after sparsification
-        let pairs_to_align = pairs.iter()
-            .filter(|&&(i, j)| self.should_align_pair(i, j))
-            .count();
-        
-        println!("Total sequence pairs: {} (will align {} after sparsification)", 
-                 pairs.len(), pairs_to_align);
-        
-        // Process pairs in parallel
-        pairs.par_iter().for_each(|&(i, j)| {
-            self.align_pair(i, j, args, &scores, &orientation_scores, &paf_writer);
-        });
-        
-        // Flush PAF writer
-        if let Some(writer) = paf_writer {
+        // Handle PAF output if requested
+        if let Some(writer) = &paf_writer {
+            let paf_aligner = AllPairIterator::with_options(
+                &allwave_sequences,
+                params.clone(),
+                true,  // exclude self
+                SparsificationStrategy::None  // No sparsification for PAF
+            ).with_orientation_params(orientation_params.clone());
+            
+            // Convert to parallel iterator and process
+            paf_aligner.into_par_iter().for_each(|alignment| {
+                let paf_record = allwave::alignment_to_paf(&alignment, &allwave_sequences);
+                if let Ok(mut w) = writer.lock() {
+                    let _ = writeln!(w, "{}", paf_record);
+                }
+            });
+            
+            // Flush PAF writer
             if let Ok(mut w) = writer.lock() {
                 let _ = w.flush();
             }
         }
-    }
-    
-    fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores, orientation_scores: &AlignmentScores, paf_writer: &Option<Arc<Mutex<BufWriter<File>>>>) {
-        let seq1 = &self.sequences[idx1];
-        let seq2 = &self.sequences[idx2];
         
-        // Apply sparsification at the alignment-pair level (before alignment)
-        if !self.should_align_pair(idx1, idx2) {
-            if args.verbose {
-                println!("Skipping alignment pair {} vs {} (sparsification filter)", seq1.id, seq2.id);
-            }
-            return;
-        }
+        // For graph construction, we also do all-vs-all excluding self
+        let n = self.sequences.len();
+        let total_pairs = n * (n - 1);  // all-vs-all excluding self
         
-        if args.verbose {
-            println!("Aligning {} vs {}", seq1.id, seq2.id);
-        }
+        println!("Total sequence pairs: {} (sparsification: {:?})", total_pairs, sparsification);
         
-        // Handle self-alignments specially
-        if idx1 == idx2 {
-            if let Some(writer) = paf_writer {
-                // Output perfect self-alignment for PAF like wfmash does
-                self.write_self_alignment(writer, seq1);
-            }
-            return;
-        }
+        // Create aligner for graph construction
+        let graph_aligner = AllPairIterator::with_options(
+            &allwave_sequences,
+            params,
+            true,  // exclude self
+            sparsification
+        ).with_orientation_params(orientation_params);
         
-        // First, do fast orientation check with edit distance scoring
-        let mut orientation_wf = create_aligner(
-            orientation_scores.match_score,
-            orientation_scores.mismatch_penalty,
-            orientation_scores.gap1_open,
-            orientation_scores.gap1_extend,
-            None,
-            None
-        );
-        
-        // Try forward-forward orientation check
-        let status_ff = orientation_wf.align(&seq1.data, &seq2.data);
-        let orientation_score_ff = if matches!(status_ff, AlignmentStatus::Completed) {
-            orientation_wf.score().saturating_abs()
-        } else {
-            i32::MAX
-        };
-        
-        // Try forward-reverse orientation check
-        let seq2_rc = seq2.reverse_complement();
-        let status_fr = orientation_wf.align(&seq1.data, &seq2_rc);
-        let orientation_score_fr = if matches!(status_fr, AlignmentStatus::Completed) {
-            orientation_wf.score().saturating_abs()
-        } else {
-            i32::MAX
-        };
-        
-        if args.verbose {
-            println!("  Orientation check - FF score: {}, FR score: {}", orientation_score_ff, orientation_score_fr);
-        }
-        
-        // Calculate max score threshold if divergence is specified
-        let max_score = args.max_divergence.map(|div| {
-            let avg_len = (seq1.data.len() + seq2.data.len()) / 2;
-            scores.max_score_for_divergence(avg_len, div)
-        });
-        
-        // Check if sequences have very different lengths
-        // Global alignment between sequences of very different lengths produces
-        // problematic terminal indels that cause PAF validation issues
-        let len_diff = (seq1.data.len() as i32 - seq2.data.len() as i32).abs();
-        let min_len = seq1.data.len().min(seq2.data.len());
-        let len_diff_ratio = len_diff as f64 / min_len as f64;
-        
-        // Skip alignment if length difference is too large (>30% of shorter sequence)
-        // Only apply this filter for graph construction, not PAF output
-        if paf_writer.is_none() && len_diff_ratio > 0.30 {
-            if args.verbose {
-                println!("  Skipping alignment: length difference too large ({} vs {}, {:.1}% diff)",
-                    seq1.data.len(), seq2.data.len(), len_diff_ratio * 100.0);
-            }
-            return;
-        }
-        
-        // When outputting to PAF, we need to try both orientations
-        // For graph construction, we'll use the better orientation
-        let orientations_to_try = if paf_writer.is_some() && !args.test_mode {
-            // For PAF output, try both orientations if both scores are reasonable
-            vec![(false, orientation_score_ff), (true, orientation_score_fr)]
-        } else {
-            // For graph construction only, choose the better orientation
-            let use_reverse = orientation_score_fr < orientation_score_ff && !args.test_mode;
-            vec![(use_reverse, if use_reverse { orientation_score_fr } else { orientation_score_ff })]
-        };
-        
-        for (is_reverse, orientation_score) in &orientations_to_try {
-            // Skip if orientation score is too high (no good alignment)
-            if *orientation_score == i32::MAX {
-                continue;
-            }
-            
-            // Create WFA aligner for full alignment
-            let mut wf = create_aligner(
-                scores.match_score,
-                scores.mismatch_penalty,
-                scores.gap1_open,
-                scores.gap1_extend,
-                scores.gap2_open,
-                scores.gap2_extend
+        // Process alignments for graph construction
+        graph_aligner.into_par_iter().for_each(|alignment| {
+            // Process all alignments (both directions) for graph construction
+            let cigar = allwave::cigar_bytes_to_string(&alignment.cigar_bytes);
+            self.process_alignment(
+                &cigar,
+                &self.sequences[alignment.query_idx],
+                &self.sequences[alignment.target_idx],
+                args.min_match_length,
+                alignment.is_reverse,
+                args.verbose
             );
-            
-            // Perform alignment in the current orientation
-            // WFA2 expects (pattern, text) where pattern=query, text=target (like allwave)
-            let (status, score) = if *is_reverse {
-                // Forward-reverse alignment: query=seq1, target=seq2_rc
-                let seq2_rc = seq2.reverse_complement();
-                let status = wf.align(&seq1.data, &seq2_rc);
-                let score = if matches!(status, AlignmentStatus::Completed) {
-                    wf.score().saturating_abs()
-                } else {
-                    i32::MAX
-                };
-                (status, score)
-            } else {
-                // Forward-forward alignment: query=seq1, target=seq2
-                let status = wf.align(&seq1.data, &seq2.data);
-                let score = if matches!(status, AlignmentStatus::Completed) {
-                    wf.score().saturating_abs()
-                } else {
-                    i32::MAX
-                };
-                (status, score)
-            };
-            
-            if args.verbose {
-                println!("  Full alignment score: {} ({})", score, if *is_reverse { "reverse" } else { "forward" });
-            }
-            
-            // Check if alignment meets threshold
-            if let Some(threshold) = max_score {
-                if score > threshold {
-                    if args.verbose {
-                        println!("  Alignment exceeds divergence threshold ({})", threshold);
-                    }
-                    continue;
-                }
-            }
-            
-            // Process the alignment if successful
-            if matches!(status, AlignmentStatus::Completed) && score != i32::MAX {
-                let cigar_bytes = wf.cigar();
-                // Use allwave's CIGAR conversion (with I/D swap and M->= conversion)
-                let cigar = cigar_bytes_to_string(cigar_bytes);
-                if args.verbose {
-                    println!("  CIGAR: {}", cigar);
-                    println!("  WFA2 called with: pattern={} (len={}), text={} (len={})", 
-                        "seq1", seq1.data.len(),
-                        if *is_reverse { "seq2_rc" } else { "seq2" },
-                        if *is_reverse { seq2.reverse_complement().len() } else { seq2.data.len() });
-                }
-                
-                // Write PAF output if requested
-                if let Some(writer) = paf_writer {
-                // Check if alignment has excessive terminal indels
-                let cigar_str = cigar.to_string();
-                let has_excessive_terminal_indels = self.check_excessive_terminal_indels(&cigar_str);
-                
-                if args.verbose && has_excessive_terminal_indels {
-                    println!("  Found excessive terminal indels in CIGAR: {}", 
-                        if cigar_str.len() > 50 { 
-                            format!("{}...{}", &cigar_str[..25], &cigar_str[cigar_str.len()-25..])
-                        } else { 
-                            cigar_str.clone() 
-                        });
-                }
-                
-                if !has_excessive_terminal_indels {
-                    // Skip alignments that are mostly indels (pathological global alignments)
-                    if cigar_str.contains("3340D") || cigar_str.contains("3340I") || 
-                       cigar_str.contains("2340D") || cigar_str.contains("2340I") ||
-                       cigar_str.contains("3339D") || cigar_str.contains("3339I") {
-                        if args.verbose {
-                            println!("  Skipping pathological alignment with huge indels");
-                        }
-                        continue;
-                    }
-                    
-                    let (cigar_query_len, cigar_target_len) = self.calculate_cigar_lengths(&cigar_str);
-                    
-                    // Check if CIGAR consumption matches sequence lengths reasonably
-                    // Allow a small tolerance for off-by-one errors
-                    if cigar_query_len <= seq1.data.len() + 2 && cigar_target_len <= seq2.data.len() + 2 {
-                        // Additional check: skip alignments with leading deletions in reverse orientation
-                        // These are causing "target sequence index out of range" errors in pafcheck
-                        if *is_reverse && cigar_str.starts_with(char::is_numeric) {
-                            let first_op_end = cigar_str.find(|c: char| !c.is_numeric()).unwrap_or(cigar_str.len());
-                            if first_op_end < cigar_str.len() && cigar_str.chars().nth(first_op_end) == Some('D') {
-                                if args.verbose {
-                                    println!("  Skipping reverse alignment with leading deletions");
-                                }
-                                return;
-                            }
-                        }
-                        
-                        // Also skip alignments with embedded deletion operations near the middle
-                        // These are causing CIGAR mismatch errors due to position calculation issues
-                        if cigar_str.contains("2D1X1=") || cigar_str.contains("1X2D") {
-                            if args.verbose {
-                                println!("  Skipping alignment with problematic deletion pattern");
-                            }
-                            return;
-                        }
-                        
-                        // Skip alignments that have both insertions and many mismatches
-                        // These cause coordinate tracking issues in PAF validation
-                        if cigar_str.contains('I') && cigar_str.contains('X') {
-                            // Count total insertions and mismatches
-                            let mut total_indels = 0;
-                            let mut total_mismatches = 0;
-                            let mut count = 0;
-                            for ch in cigar_str.chars() {
-                                if ch.is_ascii_digit() {
-                                    count = count * 10 + (ch as usize - '0' as usize);
-                                } else {
-                                    if count == 0 { count = 1; }
-                                    match ch {
-                                        'I' | 'D' => total_indels += count,
-                                        'X' => total_mismatches += count,
-                                        _ => {}
-                                    }
-                                    count = 0;
-                                }
-                            }
-                            
-                            // Skip if we have indels and many mismatches
-                            // These alignments often have coordinate tracking issues
-                            // Increase threshold to be less aggressive
-                            if total_indels > 0 && total_mismatches > 100 {
-                                if args.verbose {
-                                    println!("  Skipping alignment with {} indels and {} mismatches", 
-                                        total_indels, total_mismatches);
-                                }
-                                return;
-                            }
-                        }
-                        
-                        self.write_paf_record(writer, seq1, seq2, &cigar, score, *is_reverse, &wf, args.validate_paf);
-                    } else if args.verbose {
-                        println!("  Skipping alignment due to CIGAR consumption exceeding sequence length");
-                        println!("    Query: {} (len {}), CIGAR query consumption: {}", 
-                            seq1.id, seq1.data.len(), cigar_query_len);
-                        println!("    Target: {} (len {}), CIGAR target consumption: {}", 
-                            seq2.id, seq2.data.len(), cigar_target_len);
-                    }
-                } else if args.verbose {
-                    println!("  Skipping PAF output due to excessive terminal indels");
-                }
-                }
-                
-                // Only process alignment for graph construction if this is the best orientation
-                // or if we're only trying one orientation
-                // Also skip pathological alignments for graph construction
-                let cigar_str = cigar.to_string();
-                if !cigar_str.contains("3340D") && !cigar_str.contains("3340I") && 
-                   !cigar_str.contains("2340D") && !cigar_str.contains("2340I") &&
-                   !cigar_str.contains("3339D") && !cigar_str.contains("3339I") {
-                    if orientations_to_try.len() == 1 || (*is_reverse && orientation_score_fr < orientation_score_ff) || (!*is_reverse && orientation_score_ff <= orientation_score_fr) {
-                        self.process_alignment(&cigar, seq1, seq2, args.min_match_length, *is_reverse, args.verbose);
-                    }
-                }
-            }
-        }
+        });
     }
     
     fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, seq2_is_rc: bool, _verbose: bool) {
@@ -712,609 +506,7 @@ impl SeqRush {
             );
         }
     }
-    
-    fn trim_cigar_to_sequences(&self, cigar: &str, query_len: usize, target_len: usize) -> String {
-        // Trim CIGAR string to ensure it doesn't exceed sequence boundaries
-        let mut result = String::new();
-        let mut query_pos = 0;
-        let mut target_pos = 0;
-        let mut count = 0;
-        
-        let cigar_chars: Vec<char> = cigar.chars().collect();
-        let mut i = 0;
-        
-        while i < cigar_chars.len() && (query_pos < query_len || target_pos < target_len) {
-            if cigar_chars[i].is_ascii_digit() {
-                count = count * 10 + (cigar_chars[i] as usize - '0' as usize);
-                i += 1;
-            } else {
-                if count == 0 { count = 1; }
-                
-                let op = cigar_chars[i];
-                i += 1;
-                
-                // Check if this operation would exceed boundaries
-                match op {
-                    'M' | '=' | 'X' => {
-                        let remaining_query = query_len - query_pos;
-                        let remaining_target = target_len - target_pos;
-                        let max_count = remaining_query.min(remaining_target);
-                        
-                        if max_count > 0 {
-                            let actual_count = count.min(max_count);
-                            result.push_str(&actual_count.to_string());
-                            result.push(op);
-                            query_pos += actual_count;
-                            target_pos += actual_count;
-                            
-                            if actual_count < count {
-                                // We had to trim this operation
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    'I' => {
-                        let remaining_query = query_len - query_pos;
-                        if remaining_query > 0 {
-                            let actual_count = count.min(remaining_query);
-                            result.push_str(&actual_count.to_string());
-                            result.push(op);
-                            query_pos += actual_count;
-                            
-                            if actual_count < count {
-                                // We had to trim this operation
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    'D' => {
-                        let remaining_target = target_len - target_pos;
-                        if remaining_target > 0 {
-                            let actual_count = count.min(remaining_target);
-                            result.push_str(&actual_count.to_string());
-                            result.push(op);
-                            target_pos += actual_count;
-                            
-                            if actual_count < count {
-                                // We had to trim this operation
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    _ => {
-                        // Unknown operation, just add it
-                        result.push_str(&count.to_string());
-                        result.push(op);
-                    }
-                }
-                
-                count = 0;
-            }
-        }
-        
-        result
-    }
-    
-    fn write_self_alignment(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq: &Sequence) {
-        // Write perfect self-alignment like wfmash does
-        let cigar = format!("{}=", seq.data.len());
-        let num_mismatches = 0;
-        let block_length = seq.data.len();
-        
-        let paf_line = format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tNM:i:{}\tAS:i:{}\tcg:Z:{}",
-            seq.id,                    // query name
-            seq.data.len(),            // query length
-            0,                         // query start
-            seq.data.len(),            // query end
-            '+',                       // query strand
-            seq.id,                    // target name
-            seq.data.len(),            // target length
-            0,                         // target start
-            seq.data.len(),            // target end
-            seq.data.len(),            // number of matches
-            block_length,              // block length
-            60,                        // mapping quality (use 60 for perfect matches)
-            num_mismatches,            // NM tag
-            0,                         // AS tag (0 for perfect match)
-            cigar                      // CIGAR string
-        );
-        
-        if let Ok(mut w) = writer.lock() {
-            if let Err(e) = writeln!(w, "{}", paf_line) {
-                eprintln!("Error writing PAF record: {}", e);
-            }
-        }
-    }
-    
-    fn write_paf_record(&self, writer: &Arc<Mutex<BufWriter<File>>>, seq1: &Sequence, seq2: &Sequence, 
-                       cigar: &str, score: i32, is_reverse: bool, _wf: &lib_wfa2::affine_wavefront::AffineWavefronts, validate: bool) {
-        // PAF format conventions:
-        // - query = seq1, target = seq2
-        // - WFA2 was called with (pattern, text) = (seq1, seq2) for forward alignment
-        // - WFA2 was called with (pattern, text) = (seq1, seq2_rc) for reverse alignment
-        // - cigar_bytes_to_string already did the I/D swap for us (like allwave)
-        
-        // First, parse the CIGAR to get alignment coordinates
-        let (query_start, query_end, target_start, target_end, num_matches_initial, block_length_initial) = 
-            self.parse_cigar_for_paf(cigar, seq1.data.len(), seq2.data.len(), is_reverse);
-        
-        // Extract the aligned subsequences
-        let query_subseq = if query_end <= seq1.data.len() {
-            &seq1.data[query_start..query_end]
-        } else {
-            eprintln!("ERROR: Query end {} exceeds query length {} for {}", 
-                query_end, seq1.data.len(), seq1.id);
-            return;
-        };
-        
-        let target_subseq = if target_end <= seq2.data.len() {
-            &seq2.data[target_start..target_end]
-        } else {
-            eprintln!("ERROR: Target end {} exceeds target length {} for {}", 
-                target_end, seq2.data.len(), seq2.id);
-            return;
-        };
-        
-        // CIGAR is already in --eqx style (= and X) from cigar_bytes_to_string
-        // Re-parse to get accurate match counts
-        let (_, _, _, _, num_matches, block_length) = 
-            self.parse_cigar_for_paf(cigar, seq1.data.len(), seq2.data.len(), is_reverse);
-        
-        // Validate PAF coordinates before writing
-        if query_end > seq1.data.len() {
-            eprintln!("ERROR: Query end {} exceeds query length {} for {}", 
-                query_end, seq1.data.len(), seq1.id);
-            eprintln!("  CIGAR: {}", cigar);
-            eprintln!("  Target: {} (len {})", seq2.id, seq2.data.len());
-            eprintln!("  Is reverse: {}", is_reverse);
-            panic!("Invalid PAF coordinates");
-        }
-        
-        if target_end > seq2.data.len() {
-            eprintln!("ERROR: Target end {} exceeds target length {} for {}", 
-                target_end, seq2.data.len(), seq2.id);
-            eprintln!("  CIGAR: {}", cigar);
-            eprintln!("  Query: {} (len {})", seq1.id, seq1.data.len());
-            eprintln!("  Is reverse: {}", is_reverse);
-            panic!("Invalid PAF coordinates");
-        }
-        
-        // Skip validation of CIGAR consumption for now - the calculation is complex
-        // with leading/trailing operations and we're filtering problematic alignments anyway
-        
-        // PAF format: query_name query_len query_start query_end strand target_name target_len target_start target_end num_matches block_len mapping_quality
-        // Additional fields: NM:i:edit_distance AS:i:alignment_score cg:Z:cigar
-        let strand = if is_reverse { '-' } else { '+' };
-        let mapq = 60; // High quality since we're doing full alignment
-        
-        // Calculate edit distance from score (assuming match=0, mismatch and gaps add to score)
-        let edit_distance = score;
-        
-        // Validate the PAF record before writing if requested
-        if validate {
-            if let Err(e) = self.validate_paf_alignment(
-                seq1, seq2, query_start, query_end, target_start, target_end, 
-                is_reverse, cigar
-            ) {
-                eprintln!("PAF validation error for {} vs {}: {}", seq1.id, seq2.id, e);
-                eprintln!("  Query: {}bp [{}-{}], Target: {}bp [{}-{}], Strand: {}", 
-                    seq1.data.len(), query_start, query_end,
-                    seq2.data.len(), target_start, target_end, 
-                    strand);
-                eprintln!("  CIGAR: {}", cigar);
-                return;  // Skip writing invalid PAF records
-            }
-        }
-        
-        if let Ok(mut w) = writer.lock() {
-            let _ = writeln!(w, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tNM:i:{}\tAS:i:{}\tcg:Z:{}",
-                seq1.id,
-                seq1.data.len(),
-                query_start,
-                query_end,
-                strand,
-                seq2.id,
-                seq2.data.len(),
-                target_start,
-                target_end,
-                num_matches,
-                block_length,
-                mapq,
-                edit_distance,
-                score.saturating_neg(), // AS tag is typically negative of edit distance
-                cigar
-            );
-        }
-    }
-    
-    fn calculate_cigar_lengths(&self, cigar: &str) -> (usize, usize) {
-        let mut query_len = 0;
-        let mut target_len = 0;
-        let mut count = 0;
-        
-        for ch in cigar.chars() {
-            if ch.is_ascii_digit() {
-                count = count * 10 + (ch as usize - '0' as usize);
-            } else {
-                if count == 0 { count = 1; }
-                match ch {
-                    'M' | '=' | 'X' => {
-                        query_len += count;
-                        target_len += count;
-                    }
-                    'I' => {
-                        query_len += count;
-                    }
-                    'D' => {
-                        target_len += count;
-                    }
-                    _ => {}
-                }
-                count = 0;
-            }
-        }
-        
-        (query_len, target_len)
-    }
-    
-    fn check_excessive_terminal_indels(&self, cigar: &str) -> bool {
-        // Check if CIGAR has excessive indels at the start or end
-        // These indicate forced global alignments between sequences of very different lengths
-        let threshold = 10; // More than 10 indels at either end is considered excessive
-        
-        // Parse CIGAR to check first and last operations
-        let mut operations = Vec::new();
-        let mut count = 0;
-        
-        for ch in cigar.chars() {
-            if ch.is_ascii_digit() {
-                count = count * 10 + (ch as usize - '0' as usize);
-            } else {
-                if count == 0 { count = 1; }
-                operations.push((count, ch));
-                count = 0;
-            }
-        }
-        
-        if operations.is_empty() {
-            return false;
-        }
-        
-        // Check first operation
-        if let Some((count, op)) = operations.first() {
-            if (*op == 'I' || *op == 'D') && *count > threshold {
-                return true;
-            }
-        }
-        
-        // Check last operation  
-        if let Some((count, op)) = operations.last() {
-            if (*op == 'I' || *op == 'D') && *count > threshold {
-                return true;
-            }
-        }
-        
-        // Also check if we have terminal indels in both the first few and last few operations
-        // This catches cases like "...14I...11D" at the end
-        let check_range = 5; // Check first/last 5 operations
-        let mut start_indels = 0;
-        let mut end_indels = 0;
-        
-        // Count indels in first few operations
-        for i in 0..operations.len().min(check_range) {
-            let (count, op) = operations[i];
-            if op == 'I' || op == 'D' {
-                start_indels += count;
-            }
-        }
-        
-        // Count indels in last few operations
-        let start_idx = operations.len().saturating_sub(check_range);
-        for i in start_idx..operations.len() {
-            let (count, op) = operations[i];
-            if op == 'I' || op == 'D' {
-                end_indels += count;
-            }
-        }
-        
-        // If we have many indels at either end, filter it out
-        start_indels > threshold || end_indels > threshold
-    }
-    
-    fn invert_cigar(&self, cigar: &str) -> String {
-        // Invert CIGAR string: I becomes D and D becomes I
-        // Also properly accumulate consecutive operations
-        let mut result = String::new();
-        let mut count = 0;
-        let mut current_op: Option<char> = None;
-        let mut accumulated_count = 0;
-        
-        for ch in cigar.chars() {
-            if ch.is_ascii_digit() {
-                count = count * 10 + (ch as usize - '0' as usize);
-            } else {
-                if count == 0 { count = 1; }  // Handle implicit count of 1
-                
-                let op = match ch {
-                    'I' => 'D',  // Insertion in text becomes deletion in query
-                    'D' => 'I',  // Deletion in text becomes insertion in query
-                    _ => ch,     // M, =, X remain the same
-                };
-                
-                // If this is the same operation as the current one, accumulate
-                if current_op == Some(op) {
-                    accumulated_count += count;
-                } else {
-                    // Output the previous operation if there was one
-                    if let Some(prev_op) = current_op {
-                        result.push_str(&accumulated_count.to_string());
-                        result.push(prev_op);
-                    }
-                    // Start accumulating the new operation
-                    current_op = Some(op);
-                    accumulated_count = count;
-                }
-                
-                count = 0;
-            }
-        }
-        
-        // Output the last operation if there was one
-        if let Some(op) = current_op {
-            result.push_str(&accumulated_count.to_string());
-            result.push(op);
-        }
-        
-        result
-    }
-    
-    fn convert_to_eqx_cigar(&self, cigar: &str, seq1: &[u8], seq2: &[u8], is_reverse: bool) -> String {
-        // Convert M operations to =/X for matches/mismatches (--eqx style) and compact the CIGAR
-        // Parameters:
-        // - seq1 is query sequence
-        // - seq2 is target sequence  
-        // - CIGAR operations are now query->target after inversion
-        // - For reverse alignments, we compare reverse_complement(query) to target
-        let mut result = String::new();
-        let mut count = 0;
-        let mut current_op: Option<char> = None;
-        let mut op_count = 0;
-        
-        let mut pos_query = 0;   // position in seq1 (query)
-        let mut pos_target = 0;  // position in seq2 (target)
-        
-        // For forward alignments: compare query to target directly
-        // For reverse alignments: compare reverse complement of query to target
-        let (seq1_data, seq2_data) = if is_reverse {
-            // For reverse, we're comparing RC(seq1) against seq2
-            let mut rc = seq1.to_vec();
-            rc.reverse();
-            for b in &mut rc {
-                *b = match *b {
-                    b'A' | b'a' => b'T',
-                    b'T' | b't' => b'A',
-                    b'C' | b'c' => b'G',
-                    b'G' | b'g' => b'C',
-                    _ => *b,
-                };
-            }
-            (rc, seq2.to_vec())
-        } else {
-            (seq1.to_vec(), seq2.to_vec())
-        };
-        
-        for ch in cigar.chars() {
-            if ch.is_ascii_digit() {
-                count = count * 10 + (ch as usize - '0' as usize);
-            } else {
-                if count == 0 { count = 1; }
-                
-                match ch {
-                    'M' => {
-                        // For M operations, check each position to see if it's a match or mismatch
-                        for _ in 0..count {
-                            let op = if pos_query < seq1_data.len() && pos_target < seq2_data.len() && seq1_data[pos_query] == seq2_data[pos_target] {
-                                '='
-                            } else {
-                                'X'
-                            };
-                            
-                            // Accumulate same operations
-                            if current_op.is_some() && current_op != Some(op) {
-                                result.push_str(&op_count.to_string());
-                                result.push(current_op.unwrap());
-                                op_count = 0;
-                            }
-                            current_op = Some(op);
-                            op_count += 1;
-                            
-                            pos_query += 1;
-                            pos_target += 1;
-                        }
-                    }
-                    'I' => {
-                        // Insertion in query relative to target
-                        let op = 'I';
-                        if current_op.is_some() && current_op != Some(op) {
-                            result.push_str(&op_count.to_string());
-                            result.push(current_op.unwrap());
-                            op_count = 0;
-                        }
-                        current_op = Some(op);
-                        op_count += count;
-                        pos_query += count;
-                    }
-                    'D' => {
-                        // Deletion in query relative to target
-                        let op = 'D';
-                        if current_op.is_some() && current_op != Some(op) {
-                            result.push_str(&op_count.to_string());
-                            result.push(current_op.unwrap());
-                            op_count = 0;
-                        }
-                        current_op = Some(op);
-                        op_count += count;
-                        pos_target += count;
-                    }
-                    'X' => {
-                        // Already a mismatch
-                        let op = 'X';
-                        if current_op.is_some() && current_op != Some(op) {
-                            result.push_str(&op_count.to_string());
-                            result.push(current_op.unwrap());
-                            op_count = 0;
-                        }
-                        current_op = Some(op);
-                        op_count += count;
-                        pos_query += count;
-                        pos_target += count;
-                    }
-                    '=' => {
-                        // Already a match
-                        let op = '=';
-                        if current_op.is_some() && current_op != Some(op) {
-                            result.push_str(&op_count.to_string());
-                            result.push(current_op.unwrap());
-                            op_count = 0;
-                        }
-                        current_op = Some(op);
-                        op_count += count;
-                        pos_query += count;
-                        pos_target += count;
-                    }
-                    _ => {}
-                }
-                count = 0;
-            }
-        }
-        
-        // Write out the last operation
-        if let Some(op) = current_op {
-            result.push_str(&op_count.to_string());
-            result.push(op);
-        }
-        
-        result
-    }
-    
-    fn parse_cigar_for_paf(&self, cigar: &str, query_len: usize, target_len: usize, _is_reverse: bool) 
-        -> (usize, usize, usize, usize, usize, usize) {
-        // Parse CIGAR to determine the aligned regions and count matches
-        // We need to handle trailing indels carefully - they shouldn't extend the alignment range
-        
-        let mut num_matches = 0;
-        let mut count = 0;
-        let mut query_pos = 0;
-        let mut target_pos = 0;
-        let mut query_start = 0;
-        let mut target_start = 0;
-        let mut query_aligned_end = 0;  // Last position where both sequences were aligned
-        let mut target_aligned_end = 0;
-        let mut first_op = true;
-        
-        // Parse CIGAR operations into a vector first
-        let mut operations = Vec::new();
-        let cigar_chars: Vec<char> = cigar.chars().collect();
-        let mut i = 0;
-        
-        while i < cigar_chars.len() {
-            // Parse count
-            count = 0;
-            while i < cigar_chars.len() && cigar_chars[i].is_ascii_digit() {
-                count = count * 10 + (cigar_chars[i] as usize - '0' as usize);
-                i += 1;
-            }
-            
-            if i >= cigar_chars.len() {
-                break;
-            }
-            
-            if count == 0 { count = 1; }
-            
-            let op = cigar_chars[i];
-            i += 1;
-            
-            operations.push((count, op));
-        }
-        
-        // Process operations
-        for (count, op) in &operations {
-            // Skip the special handling for leading operations
-            // allwave always starts at 0
-            first_op = false;
-            
-            match op {
-                'M' | '=' => {
-                    num_matches += count;
-                    query_pos += count;
-                    target_pos += count;
-                    // Update aligned ends since both sequences are involved
-                    query_aligned_end = query_pos;
-                    target_aligned_end = target_pos;
-                }
-                'X' => {
-                    query_pos += count;
-                    target_pos += count;
-                    // Update aligned ends since both sequences are involved
-                    query_aligned_end = query_pos;
-                    target_aligned_end = target_pos;
-                }
-                'I' => {
-                    // Insertion in query relative to target
-                    query_pos += count;
-                    // Don't update aligned_end for trailing insertions
-                }
-                'D' => {
-                    // Deletion in query relative to target
-                    target_pos += count;
-                    // Don't update aligned_end for trailing deletions
-                }
-                _ => {}
-            }
-        }
-        
-        // Use the full consumed positions as ends
-        // PAF format expects the full range including indels
-        let query_end = query_pos.min(query_len);
-        let target_end = target_pos.min(target_len);
-        
-        // Ensure starts don't exceed lengths
-        let query_start = query_start.min(query_len);
-        let target_start = target_start.min(target_len);
-        
-        // Block length is the alignment length (sum of matches and mismatches)
-        // Count all match/mismatch operations from the CIGAR
-        let mut block_length = 0;
-        let mut tmp_count = 0;
-        for ch in cigar.chars() {
-            if ch.is_ascii_digit() {
-                tmp_count = tmp_count * 10 + (ch as usize - '0' as usize);
-            } else {
-                if tmp_count == 0 { tmp_count = 1; }
-                match ch {
-                    'M' | '=' | 'X' => {
-                        block_length += tmp_count;
-                    }
-                    _ => {}
-                }
-                tmp_count = 0;
-            }
-        }
-        
-        // Cap the ends to not exceed sequence lengths
-        let query_end = query_pos.min(query_len);
-        let target_end = target_pos.min(target_len);
-        
-        (query_start, query_end, target_start, target_end, num_matches, block_length)
-    }
-    
+
     fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let output_path = &args.output;
         let verbose = args.verbose;
@@ -1539,161 +731,6 @@ impl SeqRush {
         
         println!("Graph written to {}: {} nodes, {} edges", 
                  output_path, graph.nodes.len(), graph.edges.len());
-        
-        Ok(())
-    }
-    
-    fn should_align_pair(&self, idx1: usize, idx2: usize) -> bool {
-        if self.sparsity_threshold == u64::MAX {
-            return true; // No sparsification
-        }
-        
-        // Hash the sequence names to get a deterministic pseudo-random value
-        // Order matters: A→B is different from B→A
-        let mut hasher = DefaultHasher::new();
-        self.sequences[idx1].id.hash(&mut hasher);
-        self.sequences[idx2].id.hash(&mut hasher);
-        let hash_value = hasher.finish();
-        
-        // Keep the alignment if hash is below threshold
-        hash_value <= self.sparsity_threshold
-    }
-    
-    fn validate_paf_alignment(&self, seq1: &Sequence, seq2: &Sequence, 
-                              query_start: usize, query_end: usize,
-                              target_start: usize, target_end: usize,
-                              is_reverse: bool, cigar: &str) -> Result<(), String> {
-        // Extract the subsequences that are being aligned
-        let query_seq = if query_end <= seq1.data.len() {
-            &seq1.data[query_start..query_end]
-        } else {
-            return Err(format!("Query end {} exceeds sequence length {}", query_end, seq1.data.len()));
-        };
-        
-        let target_seq = if target_end <= seq2.data.len() {
-            &seq2.data[target_start..target_end]
-        } else {
-            return Err(format!("Target end {} exceeds sequence length {}", target_end, seq2.data.len()));
-        };
-        
-        // If reverse strand, we need to reverse complement the query
-        let query_seq = if is_reverse {
-            let mut rc = Vec::with_capacity(query_seq.len());
-            for &base in query_seq.iter().rev() {
-                rc.push(match base {
-                    b'A' | b'a' => b'T',
-                    b'T' | b't' => b'A',
-                    b'C' | b'c' => b'G',
-                    b'G' | b'g' => b'C',
-                    b => b,
-                });
-            }
-            rc
-        } else {
-            query_seq.to_vec()
-        };
-        
-        // Parse and validate the CIGAR
-        let mut q_idx = 0;
-        let mut t_idx = 0;
-        let mut count = 0;
-        
-        for ch in cigar.chars() {
-            if ch.is_ascii_digit() {
-                count = count * 10 + (ch as usize - '0' as usize);
-            } else {
-                if count == 0 { count = 1; }
-                
-                match ch {
-                    '=' => {
-                        // Match operation - verify bases actually match
-                        for i in 0..count {
-                            if q_idx + i >= query_seq.len() {
-                                return Err(format!("CIGAR match operation exceeds query length at position {}", q_idx + i));
-                            }
-                            if t_idx + i >= target_seq.len() {
-                                return Err(format!("CIGAR match operation exceeds target length at position {}", t_idx + i));
-                            }
-                            
-                            let q_base = query_seq[q_idx + i].to_ascii_uppercase();
-                            let t_base = target_seq[t_idx + i].to_ascii_uppercase();
-                            
-                            if q_base != t_base {
-                                return Err(format!(
-                                    "CIGAR match mismatch at q_pos {} (base '{}') vs t_pos {} (base '{}')",
-                                    query_start + q_idx + i, q_base as char,
-                                    target_start + t_idx + i, t_base as char
-                                ));
-                            }
-                        }
-                        q_idx += count;
-                        t_idx += count;
-                    }
-                    'X' => {
-                        // Mismatch operation - verify bases actually differ
-                        for i in 0..count {
-                            if q_idx + i >= query_seq.len() {
-                                return Err(format!("CIGAR mismatch operation exceeds query length at position {}", q_idx + i));
-                            }
-                            if t_idx + i >= target_seq.len() {
-                                return Err(format!("CIGAR mismatch operation exceeds target length at position {}", t_idx + i));
-                            }
-                            
-                            let q_base = query_seq[q_idx + i].to_ascii_uppercase();
-                            let t_base = target_seq[t_idx + i].to_ascii_uppercase();
-                            
-                            if q_base == t_base {
-                                return Err(format!(
-                                    "CIGAR mismatch error: bases match at q_pos {} (base '{}') vs t_pos {} (base '{}')",
-                                    query_start + q_idx + i, q_base as char,
-                                    target_start + t_idx + i, t_base as char
-                                ));
-                            }
-                        }
-                        q_idx += count;
-                        t_idx += count;
-                    }
-                    'I' => {
-                        // Insertion in query
-                        if q_idx + count > query_seq.len() {
-                            return Err(format!("CIGAR insertion exceeds query length at position {}", q_idx));
-                        }
-                        q_idx += count;
-                    }
-                    'D' => {
-                        // Deletion from query (insertion in target)
-                        if t_idx + count > target_seq.len() {
-                            return Err(format!("CIGAR deletion exceeds target length at position {}", t_idx));
-                        }
-                        t_idx += count;
-                    }
-                    'M' => {
-                        // M operations shouldn't appear in our --eqx style CIGAR
-                        return Err(format!("Unexpected 'M' operation in --eqx style CIGAR"));
-                    }
-                    _ => {
-                        return Err(format!("Unknown CIGAR operation: {}", ch));
-                    }
-                }
-                
-                count = 0;
-            }
-        }
-        
-        // Verify the CIGAR consumed exactly the right amount of sequence
-        if q_idx != query_seq.len() {
-            return Err(format!(
-                "CIGAR consumption mismatch for query: consumed {} but sequence length is {}",
-                q_idx, query_seq.len()
-            ));
-        }
-        
-        if t_idx != target_seq.len() {
-            return Err(format!(
-                "CIGAR consumption mismatch for target: consumed {} but sequence length is {}",
-                t_idx, target_seq.len()
-            ));
-        }
         
         Ok(())
     }

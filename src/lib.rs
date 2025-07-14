@@ -491,13 +491,13 @@ mod tests {
         //     assert_eq!(paths[0].1, paths[i].1);
         // }
         
-        // Currently we get one node per sequence
-        assert_eq!(nodes.len(), 5, "Should have one node per sequence with current implementation");
+        // With perfect alignments from allwave, identical sequences merge into one node
+        assert_eq!(nodes.len(), 1, "Identical sequences should merge into a single node");
         
-        // Without compaction, we'll have many nodes
-        // TODO: Re-enable this assertion when compaction is fixed
-        // assert_eq!(nodes.len(), 1);
-        assert!(nodes.len() > 0);
+        // Verify all paths traverse the same node
+        for i in 1..5 {
+            assert_eq!(paths[0].1, paths[i].1, "All identical sequences should follow the same path");
+        }
     }
 
     #[test]

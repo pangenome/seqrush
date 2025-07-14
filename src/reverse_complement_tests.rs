@@ -286,9 +286,8 @@ mod reverse_complement_tests {
         println!("Reverse seq: {}", reverse_str);
         println!("Node count with RC sequence: {}", node_count);
         
-        // With proper RC handling, we should have around sequence length nodes
-        // The current implementation creates many nodes (close to 2x sequence length)
-        // TODO: Fix RC handling to reduce node count
-        assert!(node_count >= 20, "Expected many nodes with current RC handling, got {}", node_count);
+        // With allwave's improved alignment, we may get fewer nodes
+        // The exact count depends on how well the RC sequences align
+        assert!(node_count >= 16, "Expected at least 16 nodes with RC handling, got {}", node_count);
     }
 }
