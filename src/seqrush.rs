@@ -333,7 +333,7 @@ impl SeqRush {
         // Try forward-forward orientation check
         let status_ff = orientation_wf.align(&seq1.data, &seq2.data);
         let orientation_score_ff = if matches!(status_ff, AlignmentStatus::Completed) {
-            orientation_wf.score().abs()
+            orientation_wf.score().saturating_abs()
         } else {
             i32::MAX
         };
@@ -342,7 +342,7 @@ impl SeqRush {
         let seq2_rc = seq2.reverse_complement();
         let status_fr = orientation_wf.align(&seq1.data, &seq2_rc);
         let orientation_score_fr = if matches!(status_fr, AlignmentStatus::Completed) {
-            orientation_wf.score().abs()
+            orientation_wf.score().saturating_abs()
         } else {
             i32::MAX
         };
@@ -408,7 +408,7 @@ impl SeqRush {
                 let seq2_rc = seq2.reverse_complement();
                 let status = wf.align(&seq1.data, &seq2_rc);
                 let score = if matches!(status, AlignmentStatus::Completed) {
-                    wf.score().abs()
+                    wf.score().saturating_abs()
                 } else {
                     i32::MAX
                 };
@@ -417,7 +417,7 @@ impl SeqRush {
                 // Forward-forward alignment: query=seq1, target=seq2
                 let status = wf.align(&seq1.data, &seq2.data);
                 let score = if matches!(status, AlignmentStatus::Completed) {
-                    wf.score().abs()
+                    wf.score().saturating_abs()
                 } else {
                     i32::MAX
                 };
@@ -928,7 +928,7 @@ impl SeqRush {
                 block_length,
                 mapq,
                 edit_distance,
-                -score, // AS tag is typically negative of edit distance
+                score.saturating_neg(), // AS tag is typically negative of edit distance
                 cigar
             );
         }

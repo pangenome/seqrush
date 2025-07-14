@@ -39,6 +39,7 @@ fn test_no_untraversed_edges_in_output() {
         no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_seqrush(args).unwrap();
@@ -106,6 +107,7 @@ fn test_self_loops_in_gfa() {
         no_compact: false, // Allow compaction
         sparsification: "1.0".to_string(),
         output_alignments: None,
+        validate_paf: true,
     };
     
     run_seqrush(args).unwrap();
@@ -157,6 +159,7 @@ fn test_complex_graph_produces_valid_gfa() {
         no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_seqrush(args).unwrap();

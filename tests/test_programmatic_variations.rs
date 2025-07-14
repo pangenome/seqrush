@@ -161,6 +161,7 @@ fn test_programmatic_inversions_scale() {
             no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -221,6 +222,7 @@ fn test_gc_content_variation() {
             no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_seqrush_bidirected_simple(args).unwrap();
@@ -301,6 +303,7 @@ fn test_motif_based_variations() {
             no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -368,6 +371,7 @@ fn test_microsatellite_instability() {
             no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -439,6 +443,7 @@ fn test_complex_structural_variation_patterns() {
             no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_inversion_aware_seqrush(args).unwrap();
@@ -521,6 +526,7 @@ fn test_nested_tandem_inversions() {
             no_compact: true,
         sparsification: "1.0".to_string(),
             output_alignments: None,
+            validate_paf: true,
         };
     
     run_inversion_aware_seqrush(args).unwrap();
