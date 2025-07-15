@@ -30,7 +30,7 @@ fn load_fasta(path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
     
     for line in reader.lines() {
         let line = line?;
-        if line.starts_with('>') {
+        if let Some(stripped) = line.strip_prefix('>') {
             if !current_id.is_empty() {
                 sequences.push(Sequence {
                     id: current_id.clone(),
@@ -38,7 +38,7 @@ fn load_fasta(path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
                 });
                 current_data.clear();
             }
-            current_id = line[1..].split_whitespace().next().unwrap_or("").to_string();
+            current_id = stripped.split_whitespace().next().unwrap_or("").to_string();
         } else {
             current_data.extend(line.trim().bytes());
         }
@@ -336,7 +336,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         block_len,
                         60,  // mapping quality
                         score,  // edit distance
-                        -score as i32,  // alignment score
+                        -score,  // alignment score
                         eqx_cigar
                     );
                 }

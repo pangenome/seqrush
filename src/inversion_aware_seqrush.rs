@@ -270,7 +270,7 @@ impl InversionAwareSeqRush {
                     }
                 }
                 
-                let cigar = String::from_utf8_lossy(&aligner.cigar()).to_string();
+                let cigar = String::from_utf8_lossy(aligner.cigar()).to_string();
                 Ok((score, cigar))
             }
             _ => Err(format!("Alignment failed with status: {:?}", status).into()),
@@ -487,7 +487,7 @@ fn read_fasta(path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
     
     for line in reader.lines() {
         let line = line?;
-        if line.starts_with('>') {
+        if let Some(stripped) = line.strip_prefix('>') {
             if !current_id.is_empty() {
                 sequences.push(Sequence {
                     id: current_id.clone(),
@@ -497,7 +497,7 @@ fn read_fasta(path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
                 offset += current_seq.len();
                 current_seq.clear();
             }
-            current_id = line[1..].split_whitespace().next().unwrap_or("").to_string();
+            current_id = stripped.split_whitespace().next().unwrap_or("").to_string();
         } else {
             current_seq.extend(line.trim().as_bytes());
         }

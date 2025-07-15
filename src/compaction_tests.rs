@@ -264,7 +264,7 @@ mod compaction_tests {
         graph.paths.push(("path1".to_string(), vec![1, 2, 3]));
         
         // Store original sequence
-        let original_seq: Vec<u8> = vec![1, 2, 3].iter()
+        let original_seq: Vec<u8> = [1, 2, 3].iter()
             .flat_map(|&id| graph.nodes[&id].sequence.clone())
             .collect();
         

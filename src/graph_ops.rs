@@ -23,6 +23,12 @@ pub struct Graph {
     pub paths: Vec<(String, Vec<usize>)>,
 }
 
+impl Default for Graph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Graph {
     pub fn new() -> Self {
         Graph {
@@ -49,14 +55,12 @@ impl Graph {
         
         // Add a safety check to prevent infinite loops
         let max_iterations = self.nodes.len();
-        let mut iterations = 0;
         
-        for chain in chains {
+        for (iterations, chain) in chains.into_iter().enumerate() {
             if iterations >= max_iterations {
                 eprintln!("WARNING: Compaction stopped after {} iterations", iterations);
                 break;
             }
-            iterations += 1;
             
             if chain.len() < 2 {
                 continue;
@@ -91,8 +95,8 @@ impl Graph {
         let mut backward_edges: HashMap<usize, Vec<usize>> = HashMap::new();
         
         for edge in &self.edges {
-            forward_edges.entry(edge.from).or_insert_with(Vec::new).push(edge.to);
-            backward_edges.entry(edge.to).or_insert_with(Vec::new).push(edge.from);
+            forward_edges.entry(edge.from).or_default().push(edge.to);
+            backward_edges.entry(edge.to).or_default().push(edge.from);
         }
         
         // Find nodes that can be part of linear chains
@@ -431,7 +435,7 @@ impl Graph {
         let mut path_positions: HashMap<usize, Vec<usize>> = HashMap::new();
         for (_, path) in &self.paths {
             for (pos, &node) in path.iter().enumerate() {
-                path_positions.entry(node).or_insert_with(Vec::new).push(pos);
+                path_positions.entry(node).or_default().push(pos);
             }
         }
         

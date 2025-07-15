@@ -558,10 +558,8 @@ impl SeqRush {
                     return Err(format!("Path verification failed after compaction: {} errors", errors.len()).into());
                 }
             }
-        } else {
-            if verbose {
-                println!("Skipping node compaction to preserve graph structure");
-            }
+        } else if verbose {
+            println!("Skipping node compaction to preserve graph structure");
         }
         
         
@@ -746,7 +744,7 @@ pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::err
     
     for line in reader.lines() {
         let line = line?;
-        if line.starts_with('>') {
+        if let Some(stripped) = line.strip_prefix('>') {
             if !current_id.is_empty() {
                 sequences.push(Sequence {
                     id: current_id.clone(),
@@ -757,7 +755,7 @@ pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::err
                 current_data.clear();
             }
             // Only take the first word (before any whitespace) as the sequence ID
-            current_id = line[1..].trim().split_whitespace().next().unwrap_or("").to_string();
+            current_id = stripped.split_whitespace().next().unwrap_or("").to_string();
         } else {
             current_data.extend(line.trim().bytes());
         }
@@ -792,7 +790,7 @@ pub fn run_seqrush(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         (fraction * u64::MAX as f64) as u64
     } else {
         match args.sparsification.parse::<f64>() {
-            Ok(frac) if frac >= 0.0 && frac <= 1.0 => {
+            Ok(frac) if (0.0..=1.0).contains(&frac) => {
                 if frac == 1.0 {
                     u64::MAX
                 } else {

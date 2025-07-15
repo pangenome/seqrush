@@ -179,7 +179,7 @@ mod tests {
                 // Find the path for this sequence ID
                 let path_entry = paths.iter()
                     .find(|(path_id, _)| path_id == seq_id)
-                    .expect(&format!("No path found for sequence {}", seq_id));
+                    .unwrap_or_else(|| panic!("No path found for sequence {}", seq_id));
                 
                 let reconstructed = reconstruct_sequence_from_path(&nodes, &path_entry.1);
                 assert_eq!(&reconstructed, seq, "Failed to reconstruct {}", seq_id);
@@ -207,7 +207,7 @@ mod tests {
         // Without compaction, we may have more nodes
         // TODO: Re-enable this assertion when compaction is fixed
         // assert!(nodes.len() < 100);
-        assert!(nodes.len() > 0);
+        assert!(!nodes.is_empty());
         // Currently getting one node per sequence with no alignment
         // TODO: Fix alignment to properly handle SNPs and create branching graph
         assert!(nodes.len() >= 4, "Should have at least one node per sequence");
