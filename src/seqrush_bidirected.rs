@@ -163,24 +163,25 @@ impl SeqRushBidirected {
         };
         
         // Create wavefront aligner
-        let mut aligner = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
-            AffineWavefronts::with_penalties_affine2p(
+        let aligner = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
+            AffineWavefronts::with_penalties_affine2p_and_memory_mode(
                 scores.match_score,
                 scores.mismatch_penalty,
                 scores.gap1_open,
                 scores.gap1_extend,
                 scores.gap2_open.unwrap(),
-                scores.gap2_extend.unwrap()
+                scores.gap2_extend.unwrap(),
+                MemoryMode::Ultralow
             )
         } else {
-            AffineWavefronts::with_penalties(
+            AffineWavefronts::with_penalties_and_memory_mode(
                 scores.match_score,
                 scores.mismatch_penalty,
                 scores.gap1_open,
-                scores.gap1_extend
+                scores.gap1_extend,
+                MemoryMode::Ultralow
             )
         };
-        aligner.set_memory_mode(MemoryMode::Ultralow);
         
         // Perform alignment
         let status = aligner.align(&pattern, &text);
@@ -200,7 +201,7 @@ impl SeqRushBidirected {
                     }
                 }
                 
-                let cigar = String::from_utf8_lossy(&aligner.cigar()).to_string();
+                let cigar = String::from_utf8_lossy(aligner.cigar()).to_string();
                 Ok(AlignmentResult { score, cigar })
             }
             _ => Err(format!("Alignment failed with status: {:?}", status).into()),
@@ -425,7 +426,7 @@ fn read_fasta(path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
     
     for line in reader.lines() {
         let line = line?;
-        if line.starts_with('>') {
+        if let Some(stripped) = line.strip_prefix('>') {
             if !current_id.is_empty() {
                 sequences.push(Sequence {
                     id: current_id.clone(),
@@ -435,7 +436,7 @@ fn read_fasta(path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
                 offset += current_seq.len();
                 current_seq.clear();
             }
-            current_id = line[1..].split_whitespace().next().unwrap_or("").to_string();
+            current_id = stripped.split_whitespace().next().unwrap_or("").to_string();
         } else {
             current_seq.extend(line.trim().as_bytes());
         }

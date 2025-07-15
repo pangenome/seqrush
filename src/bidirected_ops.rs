@@ -10,6 +10,12 @@ pub struct BidirectedGraph {
     pub paths: Vec<BiPath>,
 }
 
+impl Default for BidirectedGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BidirectedGraph {
     pub fn new() -> Self {
         BidirectedGraph {
@@ -220,12 +226,12 @@ impl BidirectedGraph {
             edge_list.push(*edge);
             
             // Direct edge: from → to
-            edges_by_from.entry(edge.from).or_insert_with(Vec::new).push((edge.to, edge_idx));
-            edges_by_to.entry(edge.to).or_insert_with(Vec::new).push((edge.from, edge_idx));
+            edges_by_from.entry(edge.from).or_default().push((edge.to, edge_idx));
+            edges_by_to.entry(edge.to).or_default().push((edge.from, edge_idx));
             
             // Implied reverse edge: to.flip() → from.flip()
-            edges_by_from.entry(edge.to.flip()).or_insert_with(Vec::new).push((edge.from.flip(), edge_idx));
-            edges_by_to.entry(edge.from.flip()).or_insert_with(Vec::new).push((edge.to.flip(), edge_idx));
+            edges_by_from.entry(edge.to.flip()).or_default().push((edge.from.flip(), edge_idx));
+            edges_by_to.entry(edge.from.flip()).or_default().push((edge.to.flip(), edge_idx));
         }
         
         // Track masked edges (simulating edge removal without modifying graph)

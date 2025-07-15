@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::fs::File;
 use std::io::{BufWriter, Write, BufRead, BufReader};
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
-use uf_rush::UFRush;
-use lib_wfa2::affine_wavefront::{AffineWavefronts, MemoryMode, AlignmentStatus};
+use std::sync::Mutex;
 use crate::graph_ops::{Graph, Node, Edge};
+use crate::bidirected_union_find::BidirectedUnionFind;
+use crate::pos::{Pos, make_pos};
+use allwave::{AllPairIterator, AlignmentParams, SparsificationStrategy};
 
 #[derive(Parser)]
 #[command(name = "seqrush", version = "0.4.0", about = "Dynamic pangenome graph construction")]
@@ -56,6 +56,14 @@ pub struct Args {
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
     #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
     pub sparsification: String,
+    
+    /// Output alignments to PAF file
+    #[arg(long = "output-alignments")]
+    pub output_alignments: Option<String>,
+    
+    /// Validate PAF records as they are generated (helps catch bugs immediately)
+    #[arg(long = "validate-paf", default_value = "true")]
+    pub validate_paf: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -181,14 +189,14 @@ impl Sequence {
 pub struct SeqRush {
     pub sequences: Vec<Sequence>,
     pub total_length: usize,
-    pub union_find: Arc<UFRush>,
+    pub union_find: BidirectedUnionFind,
     pub sparsity_threshold: u64,
 }
 
 impl SeqRush {
     pub fn new(sequences: Vec<Sequence>, sparsity_threshold: u64) -> Self {
         let total_length = sequences.iter().map(|s| s.data.len()).sum();
-        let union_find = Arc::new(UFRush::new(total_length));
+        let union_find = BidirectedUnionFind::new(total_length);
         
         Self {
             sequences,
@@ -210,6 +218,11 @@ impl SeqRush {
     }
     
     pub fn align_and_unite(&self, args: &Args) {
+        // Use the new allwave-based implementation
+        self.align_and_unite_with_allwave(args);
+    }
+    
+    pub fn align_and_unite_with_allwave(&self, args: &Args) {
         // Parse alignment scores
         let scores = match AlignmentScores::parse(&args.scores) {
             Ok(s) => s,
@@ -230,152 +243,122 @@ impl SeqRush {
         
         if args.verbose {
             println!("Using alignment scores: {:?}", scores);
-            println!("Using orientation check scores: {:?}", orientation_scores);
+            println!("Using orientation scores: {:?}", orientation_scores);
         }
         
-        let n = self.sequences.len();
-        let pairs: Vec<(usize, usize)> = (0..n)
-            .flat_map(|i| (i+1..n).map(move |j| (i, j)))
+        // Convert sequences to allwave format
+        let allwave_sequences: Vec<allwave::Sequence> = self.sequences.iter()
+            .map(|s| allwave::Sequence {
+                id: s.id.clone(),
+                seq: s.data.clone(),
+            })
             .collect();
         
-        // Count how many pairs will actually be aligned after sparsification
-        let pairs_to_align = pairs.iter()
-            .filter(|&&(i, j)| self.should_align_pair(i, j))
-            .count();
-        
-        println!("Total sequence pairs: {} (will align {} after sparsification)", 
-                 pairs.len(), pairs_to_align);
-        
-        // Process pairs in parallel
-        pairs.par_iter().for_each(|&(i, j)| {
-            self.align_pair(i, j, args, &scores, &orientation_scores);
-        });
-    }
-    
-    fn align_pair(&self, idx1: usize, idx2: usize, args: &Args, scores: &AlignmentScores, orientation_scores: &AlignmentScores) {
-        let seq1 = &self.sequences[idx1];
-        let seq2 = &self.sequences[idx2];
-        
-        // Apply sparsification at the alignment-pair level (before alignment)
-        if !self.should_align_pair(idx1, idx2) {
-            if args.verbose {
-                println!("Skipping alignment pair {} vs {} (sparsification filter)", seq1.id, seq2.id);
-            }
-            return;
-        }
-        
-        if args.verbose {
-            println!("Aligning {} vs {}", seq1.id, seq2.id);
-        }
-        
-        // First, do fast orientation check with edit distance scoring
-        let mut orientation_wf = AffineWavefronts::with_penalties(
-            orientation_scores.match_score,
-            orientation_scores.mismatch_penalty,
-            orientation_scores.gap1_open,
-            orientation_scores.gap1_extend
-        );
-        orientation_wf.set_memory_mode(MemoryMode::Ultralow);
-        
-        // Try forward-forward orientation check
-        let status_ff = orientation_wf.align(&seq1.data, &seq2.data);
-        let orientation_score_ff = if matches!(status_ff, AlignmentStatus::Completed) {
-            orientation_wf.score().abs()
-        } else {
-            i32::MAX
+        // Create alignment parameters
+        let params = AlignmentParams {
+            match_score: scores.match_score,
+            mismatch_penalty: scores.mismatch_penalty,
+            gap_open: scores.gap1_open,
+            gap_extend: scores.gap1_extend,
+            gap2_open: scores.gap2_open,
+            gap2_extend: scores.gap2_extend,
+            max_divergence: args.max_divergence,
         };
         
-        // Try forward-reverse orientation check
-        let seq2_rc = seq2.reverse_complement();
-        let status_fr = orientation_wf.align(&seq1.data, &seq2_rc);
-        let orientation_score_fr = if matches!(status_fr, AlignmentStatus::Completed) {
-            orientation_wf.score().abs()
-        } else {
-            i32::MAX
+        let orientation_params = AlignmentParams {
+            match_score: orientation_scores.match_score,
+            mismatch_penalty: orientation_scores.mismatch_penalty,
+            gap_open: orientation_scores.gap1_open,
+            gap_extend: orientation_scores.gap1_extend,
+            gap2_open: orientation_scores.gap2_open,
+            gap2_extend: orientation_scores.gap2_extend,
+            max_divergence: None,
         };
         
-        if args.verbose {
-            println!("  Orientation check - FF score: {}, FR score: {}", orientation_score_ff, orientation_score_fr);
-        }
-        
-        // Choose the better orientation
-        let use_reverse = orientation_score_fr < orientation_score_ff && !args.test_mode;
-        
-        // Calculate max score threshold if divergence is specified
-        let max_score = args.max_divergence.map(|div| {
-            let avg_len = (seq1.data.len() + seq2.data.len()) / 2;
-            scores.max_score_for_divergence(avg_len, div)
-        });
-        
-        // Create WFA aligner for full alignment
-        let mut wf = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
-            // Two-piece affine gap model
-            // TODO: Update when WFA2 bindings support two-piece affine
-            // For now, fall back to single affine
-            AffineWavefronts::with_penalties(
-                scores.match_score,
-                scores.mismatch_penalty,
-                scores.gap1_open,
-                scores.gap1_extend
-            )
-        } else {
-            // Single affine gap model
-            AffineWavefronts::with_penalties(
-                scores.match_score,
-                scores.mismatch_penalty,
-                scores.gap1_open,
-                scores.gap1_extend
-            )
-        };
-        wf.set_memory_mode(MemoryMode::Ultralow);
-        
-        // Perform alignment in the chosen orientation
-        let (status, score, is_reverse) = if use_reverse {
-            // Forward-reverse alignment
-            let status = wf.align(&seq1.data, &seq2_rc);
-            let score = if matches!(status, AlignmentStatus::Completed) {
-                wf.score().abs()
-            } else {
-                i32::MAX
-            };
-            (status, score, true)
-        } else {
-            // Forward-forward alignment
-            let status = wf.align(&seq1.data, &seq2.data);
-            let score = if matches!(status, AlignmentStatus::Completed) {
-                wf.score().abs()
-            } else {
-                i32::MAX
-            };
-            (status, score, false)
-        };
-        
-        if args.verbose {
-            println!("  Full alignment score: {} ({})", score, if is_reverse { "reverse" } else { "forward" });
-        }
-        
-        // Check if alignment meets threshold
-        if let Some(threshold) = max_score {
-            if score > threshold {
-                if args.verbose {
-                    println!("  Alignment exceeds divergence threshold ({})", threshold);
+        // Parse sparsification strategy
+        let sparsification = match args.sparsification.as_str() {
+            "1.0" => SparsificationStrategy::None,
+            "auto" => SparsificationStrategy::Auto,
+            s => {
+                match s.parse::<f64>() {
+                    Ok(factor) if factor > 0.0 && factor <= 1.0 => SparsificationStrategy::Random(factor),
+                    _ => {
+                        eprintln!("Invalid sparsification factor: {}. Using 1.0 (no sparsification)", s);
+                        SparsificationStrategy::None
+                    }
                 }
-                return;
+            }
+        };
+        
+        // Create PAF writer if requested
+        let paf_writer = if let Some(paf_path) = &args.output_alignments {
+            match File::create(paf_path) {
+                Ok(file) => {
+                    println!("Writing alignments to {}", paf_path);
+                    Some(Arc::new(Mutex::new(BufWriter::new(file))))
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to create PAF file {}: {}", paf_path, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
+        // Handle PAF output if requested
+        if let Some(writer) = &paf_writer {
+            let paf_aligner = AllPairIterator::with_options(
+                &allwave_sequences,
+                params.clone(),
+                true,  // exclude self
+                SparsificationStrategy::None  // No sparsification for PAF
+            ).with_orientation_params(orientation_params.clone());
+            
+            // Convert to parallel iterator and process
+            paf_aligner.into_par_iter().for_each(|alignment| {
+                let paf_record = allwave::alignment_to_paf(&alignment, &allwave_sequences);
+                if let Ok(mut w) = writer.lock() {
+                    let _ = writeln!(w, "{}", paf_record);
+                }
+            });
+            
+            // Flush PAF writer
+            if let Ok(mut w) = writer.lock() {
+                let _ = w.flush();
             }
         }
         
-        // Process the alignment if successful
-        if matches!(status, AlignmentStatus::Completed) && score != i32::MAX {
-            let cigar_bytes = wf.cigar();
-            let cigar = String::from_utf8_lossy(cigar_bytes);
-            if args.verbose {
-                println!("  CIGAR: {}", cigar);
-            }
-            self.process_alignment(&cigar, seq1, seq2, args.min_match_length, is_reverse);
-        }
+        // For graph construction, we also do all-vs-all excluding self
+        let n = self.sequences.len();
+        let total_pairs = n * (n - 1);  // all-vs-all excluding self
+        
+        println!("Total sequence pairs: {} (sparsification: {:?})", total_pairs, sparsification);
+        
+        // Create aligner for graph construction
+        let graph_aligner = AllPairIterator::with_options(
+            &allwave_sequences,
+            params,
+            true,  // exclude self
+            sparsification
+        ).with_orientation_params(orientation_params);
+        
+        // Process alignments for graph construction
+        graph_aligner.into_par_iter().for_each(|alignment| {
+            // Process all alignments (both directions) for graph construction
+            let cigar = allwave::cigar_bytes_to_string(&alignment.cigar_bytes);
+            self.process_alignment(
+                &cigar,
+                &self.sequences[alignment.query_idx],
+                &self.sequences[alignment.target_idx],
+                args.min_match_length,
+                alignment.is_reverse,
+                args.verbose
+            );
+        });
     }
     
-    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, seq2_is_rc: bool) {
+    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, seq2_is_rc: bool, _verbose: bool) {
         let mut pos1 = 0;
         let mut pos2 = 0;
         let mut count = 0;
@@ -386,6 +369,13 @@ impl SeqRush {
         let mut match_run_start2 = 0;
         let mut match_run_len = 0;
         
+        // If seq2 was reverse complemented for alignment, we need to compare against the RC
+        let seq2_data = if seq2_is_rc {
+            seq2.reverse_complement()
+        } else {
+            seq2.data.clone()
+        };
+        
         for ch in cigar.chars() {
             if ch.is_ascii_digit() {
                 count = count * 10 + (ch as usize - '0' as usize);
@@ -394,35 +384,51 @@ impl SeqRush {
                 
                 match ch {
                     'M' | '=' => {
+                        // if verbose {
+                        //     println!("    Processing {}M operation at pos1={}, pos2={}", count, pos1, pos2);
+                        // }
                         // For 'M' operations, we need to check if bases actually match
                         // since 'M' can represent either match or mismatch
                         
                         // Check all positions in this M operation
                         for k in 0..count {
-                            if pos1 + k < seq1.data.len() && pos2 + k < seq2.data.len() {
-                                if seq1.data[pos1 + k] == seq2.data[pos2 + k] {
+                            if pos1 + k < seq1.data.len() && pos2 + k < seq2_data.len() {
+                                let base1 = seq1.data[pos1 + k];
+                                let base2 = seq2_data[pos2 + k];
+                                // if verbose && k < 3 {
+                                //     println!("      pos {}+{}: {} vs {} = {}", pos1, k, base1 as char, base2 as char, base1 == base2);
+                                // }
+                                if base1 == base2 {
                                     // Bases match - extend or start match run
                                     if !in_match_run {
                                         in_match_run = true;
                                         match_run_start1 = pos1 + k;
                                         match_run_start2 = pos2 + k;
                                         match_run_len = 1;
+                                        // if verbose {
+                                        //     println!("      Starting match run at pos1={}, pos2={}", match_run_start1, match_run_start2);
+                                        // }
                                     } else {
                                         match_run_len += 1;
                                     }
                                 } else {
                                     // Mismatch - process any accumulated match run
                                     if in_match_run && match_run_len >= min_match_len {
-                                        for j in 0..match_run_len {
-                                            let global_pos1 = seq1.offset + match_run_start1 + j;
-                                            let global_pos2 = if seq2_is_rc {
-                                                // Map reverse complement position back to forward strand
-                                                seq2.offset + (seq2.data.len() - 1 - (match_run_start2 + j))
-                                            } else {
-                                                seq2.offset + match_run_start2 + j
-                                            };
-                                            self.union_find.unite(global_pos1, global_pos2);
-                                        }
+                                        // if verbose {
+                                        //     println!("    Uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
+                                        //             match_run_start1, match_run_start1 + match_run_len,
+                                        //             match_run_start2, match_run_start2 + match_run_len,
+                                        //             seq2_is_rc);
+                                        // }
+                                        self.union_find.unite_matching_region(
+                                            seq1.offset,
+                                            seq2.offset,
+                                            match_run_start1,
+                                            match_run_start2,
+                                            match_run_len,
+                                            seq2_is_rc,
+                                            seq2.data.len(),
+                                        );
                                     }
                                     in_match_run = false;
                                     match_run_len = 0;
@@ -436,16 +442,21 @@ impl SeqRush {
                     _ => {
                         // Not a match operation - process any accumulated match run
                         if in_match_run && match_run_len >= min_match_len {
-                            for j in 0..match_run_len {
-                                let global_pos1 = seq1.offset + match_run_start1 + j;
-                                let global_pos2 = if seq2_is_rc {
-                                    // Map reverse complement position back to forward strand
-                                    seq2.offset + (seq2.data.len() - 1 - (match_run_start2 + j))
-                                } else {
-                                    seq2.offset + match_run_start2 + j
-                                };
-                                self.union_find.unite(global_pos1, global_pos2);
-                            }
+                            // if verbose {
+                            //     println!("    Uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
+                            //             match_run_start1, match_run_start1 + match_run_len,
+                            //             match_run_start2, match_run_start2 + match_run_len,
+                            //             seq2_is_rc);
+                            // }
+                            self.union_find.unite_matching_region(
+                                seq1.offset,
+                                seq2.offset,
+                                match_run_start1,
+                                match_run_start2,
+                                match_run_len,
+                                seq2_is_rc,
+                                seq2.data.len(),
+                            );
                         }
                         in_match_run = false;
                         match_run_len = 0;
@@ -457,12 +468,12 @@ impl SeqRush {
                                 pos2 += count; 
                             }
                             'I' => { 
-                                // Insertion in seq2
-                                pos2 += count; 
+                                // Insertion in query (seq1) relative to target (seq2)
+                                pos1 += count; 
                             }
                             'D' => { 
-                                // Deletion in seq2
-                                pos1 += count; 
+                                // Deletion in query (seq1) relative to target (seq2)
+                                pos2 += count; 
                             }
                             _ => {}
                         }
@@ -473,20 +484,29 @@ impl SeqRush {
         }
         
         // Process final match run if alignment ends with matches
+        // if verbose {
+        //     println!("    End of CIGAR: in_match_run={}, match_run_len={}, min_match_len={}", 
+        //             in_match_run, match_run_len, min_match_len);
+        // }
         if in_match_run && match_run_len >= min_match_len {
-            for j in 0..match_run_len {
-                let global_pos1 = seq1.offset + match_run_start1 + j;
-                let global_pos2 = if seq2_is_rc {
-                    // Map reverse complement position back to forward strand
-                    seq2.offset + (seq2.data.len() - 1 - (match_run_start2 + j))
-                } else {
-                    seq2.offset + match_run_start2 + j
-                };
-                self.union_find.unite(global_pos1, global_pos2);
-            }
+            // if verbose {
+            //     println!("    Final uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
+            //             match_run_start1, match_run_start1 + match_run_len,
+            //             match_run_start2, match_run_start2 + match_run_len,
+            //             seq2_is_rc);
+            // }
+            self.union_find.unite_matching_region(
+                seq1.offset,
+                seq2.offset,
+                match_run_start1,
+                match_run_start2,
+                match_run_len,
+                seq2_is_rc,
+                seq2.data.len(),
+            );
         }
     }
-    
+
     fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let output_path = &args.output;
         let verbose = args.verbose;
@@ -538,10 +558,8 @@ impl SeqRush {
                     return Err(format!("Path verification failed after compaction: {} errors", errors.len()).into());
                 }
             }
-        } else {
-            if verbose {
-                println!("Skipping node compaction to preserve graph structure");
-            }
+        } else if verbose {
+            println!("Skipping node compaction to preserve graph structure");
         }
         
         
@@ -587,7 +605,7 @@ impl SeqRush {
         let mut graph = Graph::new();
         
         // Track which unions we've seen and their node IDs
-        let mut union_to_node: HashMap<usize, usize> = HashMap::new();
+        let mut union_to_node: HashMap<Pos, usize> = HashMap::new();
         let mut next_node_id = 1;
         
         // Build paths and discover nodes
@@ -595,35 +613,42 @@ impl SeqRush {
             let mut path = Vec::new();
             
             for i in 0..seq.data.len() {
-                let global_pos = seq.offset + i;
-                let union = self.union_find.find(global_pos);
+                // Create bidirectional position (always forward for path traversal)
+                let pos = make_pos(seq.offset + i, false);
+                let union_rep = self.union_find.find(pos);
                 
-                // Get or create node ID for this union
-                let node_id = match union_to_node.get(&union) {
+                // if verbose {
+                //     eprintln!("DEBUG: seq {} pos {} -> union_rep {} (offset={}, rev={})", 
+                //              seq.id, seq.offset + i, union_rep, union_rep >> 1, union_rep & 1);
+                // }
+                
+                // Get or create node ID for this union representative
+                let node_id = match union_to_node.get(&union_rep) {
                     Some(&id) => {
-                        // Node already exists - extend its sequence if this character is different
+                        // Node already exists - verify consistency
                         if let Some(node) = graph.nodes.get_mut(&id) {
-                            // If this is a new character in the same union, extend the node's sequence
-                            if node.sequence.is_empty() || node.sequence[node.sequence.len() - 1] != seq.data[i] {
-                                // Character differs from last in node - this is expected in bidirectional graphs
-                                // when positions from different strands are united
-                                if !node.sequence.is_empty() && node.sequence[0] != seq.data[i] {
-                                    if verbose {
-                                        eprintln!("INFO: Union {} contains multiple characters: {} and {} (expected for bidirectional graph)", 
-                                                 union, node.sequence[0] as char, seq.data[i] as char);
-                                    }
+                            // Check if the base matches what we expect
+                            let current_base = seq.data[i];
+                            if !node.sequence.is_empty() && node.sequence[0] != current_base {
+                                // This can happen when forward and reverse complement positions
+                                // are united - we need to choose a canonical representation
+                                if verbose {
+                                    eprintln!("INFO: Union representative {} contains positions with different bases: {} and {} (choosing first)", 
+                                             union_rep, node.sequence[0] as char, current_base as char);
                                 }
-                                // Keep the first character we saw for this union
-                                // In a proper bidirectional graph implementation, we'd track both
+                                // Keep the first base we saw for this union
+                            } else if node.sequence.is_empty() {
+                                // Initialize with this base
+                                node.sequence = vec![current_base];
                             }
                         }
                         id
                     }
                     None => {
-                        // First time seeing this union - create node
+                        // First time seeing this union representative - create node
                         let id = next_node_id;
                         next_node_id += 1;
-                        union_to_node.insert(union, id);
+                        union_to_node.insert(union_rep, id);
                         
                         // Create node with single character sequence
                         let node = Node {
@@ -707,22 +732,6 @@ impl SeqRush {
         
         Ok(())
     }
-    
-    fn should_align_pair(&self, idx1: usize, idx2: usize) -> bool {
-        if self.sparsity_threshold == u64::MAX {
-            return true; // No sparsification
-        }
-        
-        // Hash the sequence names to get a deterministic pseudo-random value
-        // Order matters: A→B is different from B→A
-        let mut hasher = DefaultHasher::new();
-        self.sequences[idx1].id.hash(&mut hasher);
-        self.sequences[idx2].id.hash(&mut hasher);
-        let hash_value = hasher.finish();
-        
-        // Keep the alignment if hash is below threshold
-        hash_value <= self.sparsity_threshold
-    }
 }
 
 pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::error::Error>> {
@@ -735,7 +744,7 @@ pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::err
     
     for line in reader.lines() {
         let line = line?;
-        if line.starts_with('>') {
+        if let Some(stripped) = line.strip_prefix('>') {
             if !current_id.is_empty() {
                 sequences.push(Sequence {
                     id: current_id.clone(),
@@ -745,7 +754,8 @@ pub fn load_sequences(file_path: &str) -> Result<Vec<Sequence>, Box<dyn std::err
                 offset += current_data.len();
                 current_data.clear();
             }
-            current_id = line[1..].trim().to_string();
+            // Only take the first word (before any whitespace) as the sequence ID
+            current_id = stripped.split_whitespace().next().unwrap_or("").to_string();
         } else {
             current_data.extend(line.trim().bytes());
         }
@@ -780,7 +790,7 @@ pub fn run_seqrush(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         (fraction * u64::MAX as f64) as u64
     } else {
         match args.sparsification.parse::<f64>() {
-            Ok(frac) if frac >= 0.0 && frac <= 1.0 => {
+            Ok(frac) if (0.0..=1.0).contains(&frac) => {
                 if frac == 1.0 {
                     u64::MAX
                 } else {

@@ -13,8 +13,8 @@ impl Graph {
         let mut backward_edges: HashMap<usize, Vec<usize>> = HashMap::new();
         
         for edge in &self.edges {
-            forward_edges.entry(edge.from).or_insert_with(Vec::new).push(edge.to);
-            backward_edges.entry(edge.to).or_insert_with(Vec::new).push(edge.from);
+            forward_edges.entry(edge.from).or_default().push(edge.to);
+            backward_edges.entry(edge.to).or_default().push(edge.from);
         }
         
         // Check if two nodes are perfect path neighbors (following ODGI's logic)
@@ -123,7 +123,7 @@ impl Graph {
         if debug {
             println!("DEBUG: Node degree statistics:");
             let mut sorted_degrees: Vec<_> = degree_stats.iter().collect();
-            sorted_degrees.sort_by_key(|&(_, count)| -(*count as i32));
+            sorted_degrees.sort_by_key(|&(_, count)| -{ *count });
             for ((in_deg, out_deg), count) in sorted_degrees.iter().take(10) {
                 println!("  (in={}, out={}): {} nodes", in_deg, out_deg, count);
             }
@@ -135,13 +135,13 @@ impl Graph {
         let mut component_map: HashMap<usize, Vec<usize>> = HashMap::new();
         for &node_id in self.nodes.keys() {
             let root = find(&mut parent, node_id);
-            component_map.entry(root).or_insert_with(Vec::new).push(node_id);
+            component_map.entry(root).or_default().push(node_id);
         }
         
         if debug {
             println!("DEBUG: Total components found: {}", component_map.len());
             let mut component_sizes: HashMap<usize, usize> = HashMap::new();
-            for (_, comp) in &component_map {
+            for comp in component_map.values() {
                 *component_sizes.entry(comp.len()).or_insert(0) += 1;
             }
             println!("  Component size distribution:");

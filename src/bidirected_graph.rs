@@ -227,7 +227,7 @@ mod tests {
         path.add_step(Handle::forward(1));
         path.add_step(Handle::reverse(2));
         
-        let nodes = vec![None, Some(&node1), Some(&node2)];
+        let nodes = [None, Some(&node1), Some(&node2)];
         let get_node = |id: usize| nodes.get(id).and_then(|n| *n);
         
         let seq = path.get_sequence(get_node);
