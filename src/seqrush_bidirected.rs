@@ -163,7 +163,7 @@ impl SeqRushBidirected {
         };
         
         // Create wavefront aligner
-        let mut aligner = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
+        let aligner = if scores.gap2_open.is_some() && scores.gap2_extend.is_some() {
             AffineWavefronts::with_penalties_affine2p_and_memory_mode(
                 scores.match_score,
                 scores.mismatch_penalty,
