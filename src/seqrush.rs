@@ -311,7 +311,7 @@ impl SeqRush {
             let paf_aligner = AllPairIterator::with_options(
                 &allwave_sequences,
                 params.clone(),
-                true,  // exclude self
+                false,  // include self-alignments
                 SparsificationStrategy::None  // No sparsification for PAF
             ).with_orientation_params(orientation_params.clone());
             
@@ -329,9 +329,9 @@ impl SeqRush {
             }
         }
         
-        // For graph construction, we also do all-vs-all excluding self
+        // For graph construction, we do all-vs-all including self
         let n = self.sequences.len();
-        let total_pairs = n * (n - 1);  // all-vs-all excluding self
+        let total_pairs = n * n;  // all-vs-all including self
         
         println!("Total sequence pairs: {} (sparsification: {:?})", total_pairs, sparsification);
         
@@ -339,7 +339,7 @@ impl SeqRush {
         let graph_aligner = AllPairIterator::with_options(
             &allwave_sequences,
             params,
-            true,  // exclude self
+            false,  // include self-alignments
             sparsification
         ).with_orientation_params(orientation_params);
         
@@ -358,7 +358,34 @@ impl SeqRush {
         });
     }
     
-    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, seq2_is_rc: bool, _verbose: bool) {
+    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, query_is_rc: bool, _verbose: bool) {
+        // IMPORTANT: query_is_rc means the QUERY (seq1) was reverse complemented for alignment
+        // Debug specific alignment
+        let debug_this = (seq1.id.contains("299782605") || seq2.id.contains("299782605")) && query_is_rc;
+        // Add validation function
+        let validate_match = |seq1: &Sequence, seq2: &Sequence, seq1_data: &[u8], seq2_data: &[u8], start1: usize, start2: usize, len: usize| {
+            for i in 0..len {
+                let base1 = seq1_data[start1 + i];
+                let base2 = seq2_data[start2 + i];
+                
+                if base1 != base2 {
+                    panic!(
+                        "VALIDATION ERROR: Attempting to unite non-matching bases!\n\
+                         Alignment: {} -> {}\n\
+                         Position {}: seq1_data[{}]='{}' != seq2_data[{}]='{}'\n\
+                         Match region: seq1[{}..{}] -> seq2[{}..{}] len={}\n\
+                         Seq1 context: {}\n\
+                         Seq2 context: {}",
+                        seq1.id, seq2.id,
+                        i, start1 + i, base1 as char, 
+                        start2 + i, base2 as char,
+                        start1, start1 + len, start2, start2 + len, len,
+                        String::from_utf8_lossy(&seq1_data[start1.saturating_sub(5)..(start1 + len).min(seq1_data.len())]),
+                        String::from_utf8_lossy(&seq2_data[start2.saturating_sub(5)..(start2 + len).min(seq2_data.len())])
+                    );
+                }
+            }
+        };
         let mut pos1 = 0;
         let mut pos2 = 0;
         let mut count = 0;
@@ -369,12 +396,24 @@ impl SeqRush {
         let mut match_run_start2 = 0;
         let mut match_run_len = 0;
         
-        // If seq2 was reverse complemented for alignment, we need to compare against the RC
-        let seq2_data = if seq2_is_rc {
-            seq2.reverse_complement()
+        // If query was reverse complemented for alignment, we need to compare against the RC of seq1
+        let seq1_data = if query_is_rc {
+            seq1.reverse_complement()
         } else {
-            seq2.data.clone()
+            seq1.data.clone()
         };
+        
+        if debug_this {
+            eprintln!("\n=== DEBUG ALIGNMENT ===");
+            eprintln!("Seq1: {} (len: {}, offset: {})", seq1.id, seq1.data.len(), seq1.offset);
+            eprintln!("Seq2: {} (len: {}, offset: {}) QUERY_RC={}", seq2.id, seq2.data.len(), seq2.offset, query_is_rc);
+            eprintln!("CIGAR: {}", cigar);
+            eprintln!("Seq1 start: {}", String::from_utf8_lossy(&seq1.data[0..20.min(seq1.data.len())]));
+            if query_is_rc {
+                eprintln!("Seq1 RC start: {}", String::from_utf8_lossy(&seq1_data[0..20.min(seq1_data.len())]));
+            }
+            eprintln!("Seq2 start: {}", String::from_utf8_lossy(&seq2.data[0..20.min(seq2.data.len())]));
+        }
         
         for ch in cigar.chars() {
             if ch.is_ascii_digit() {
@@ -384,6 +423,9 @@ impl SeqRush {
                 
                 match ch {
                     'M' | '=' => {
+                        if debug_this && pos1 < 100 {
+                            eprintln!("  CIGAR {}{}  pos1={} pos2={}", count, ch, pos1, pos2);
+                        }
                         // if verbose {
                         //     println!("    Processing {}M operation at pos1={}, pos2={}", count, pos1, pos2);
                         // }
@@ -392,14 +434,22 @@ impl SeqRush {
                         
                         // Check all positions in this M operation
                         for k in 0..count {
-                            if pos1 + k < seq1.data.len() && pos2 + k < seq2_data.len() {
-                                let base1 = seq1.data[pos1 + k];
-                                let base2 = seq2_data[pos2 + k];
+                            if pos1 + k < seq1_data.len() && pos2 + k < seq2.data.len() {
+                                let base1 = seq1_data[pos1 + k];
+                                let base2 = seq2.data[pos2 + k];
+                                if debug_this && ch == '=' && k < 3 {
+                                    eprintln!("    '=' op: comparing seq1_data[{}]='{}' vs seq2[{}]='{}'", 
+                                        pos1 + k, base1 as char, pos2 + k, base2 as char);
+                                }
                                 // if verbose && k < 3 {
                                 //     println!("      pos {}+{}: {} vs {} = {}", pos1, k, base1 as char, base2 as char, base1 == base2);
                                 // }
                                 if base1 == base2 {
                                     // Bases match - extend or start match run
+                                    if debug_this && pos1 + k < 20 {
+                                        eprintln!("    Match at pos1={} pos2={}: '{}' == '{}'", 
+                                            pos1 + k, pos2 + k, base1 as char, base2 as char);
+                                    }
                                     if !in_match_run {
                                         in_match_run = true;
                                         match_run_start1 = pos1 + k;
@@ -413,22 +463,48 @@ impl SeqRush {
                                     }
                                 } else {
                                     // Mismatch - process any accumulated match run
+                                    if debug_this && in_match_run {
+                                        eprintln!("    Breaking match run at mismatch: len={} >= min_len={}? {}", 
+                                            match_run_len, min_match_len, match_run_len >= min_match_len);
+                                    }
                                     if in_match_run && match_run_len >= min_match_len {
                                         // if verbose {
                                         //     println!("    Uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
                                         //             match_run_start1, match_run_start1 + match_run_len,
                                         //             match_run_start2, match_run_start2 + match_run_len,
-                                        //             seq2_is_rc);
+                                        //             query_is_rc);
                                         // }
-                                        self.union_find.unite_matching_region(
-                                            seq1.offset,
-                                            seq2.offset,
-                                            match_run_start1,
-                                            match_run_start2,
-                                            match_run_len,
-                                            seq2_is_rc,
-                                            seq2.data.len(),
-                                        );
+                                        // Validate before uniting
+                                        validate_match(seq1, seq2, &seq1_data, &seq2.data, match_run_start1, match_run_start2, match_run_len);
+                                        if debug_this {
+                                            eprintln!("UNITING: seq1[{}..{}] <-> seq2[{}..{}] len={} (RC={})",
+                                                match_run_start1, match_run_start1 + match_run_len,
+                                                match_run_start2, match_run_start2 + match_run_len,
+                                                match_run_len, query_is_rc);
+                                        }
+                                        if query_is_rc {
+                                            // Query (seq1) was RC'd for alignment
+                                            self.union_find.unite_matching_region(
+                                                seq1.offset,
+                                                seq2.offset,
+                                                match_run_start1,
+                                                match_run_start2,
+                                                match_run_len,
+                                                true,  // seq1 is RC
+                                                seq1.data.len(),  // seq1 length for RC transformation
+                                            );
+                                        } else {
+                                            // Normal forward-forward alignment
+                                            self.union_find.unite_matching_region(
+                                                seq1.offset,
+                                                seq2.offset,
+                                                match_run_start1,
+                                                match_run_start2,
+                                                match_run_len,
+                                                false,
+                                                0,  // Not used for forward alignments
+                                            );
+                                        }
                                     }
                                     in_match_run = false;
                                     match_run_len = 0;
@@ -446,17 +522,39 @@ impl SeqRush {
                             //     println!("    Uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
                             //             match_run_start1, match_run_start1 + match_run_len,
                             //             match_run_start2, match_run_start2 + match_run_len,
-                            //             seq2_is_rc);
+                            //             query_is_rc);
                             // }
-                            self.union_find.unite_matching_region(
-                                seq1.offset,
-                                seq2.offset,
-                                match_run_start1,
-                                match_run_start2,
-                                match_run_len,
-                                seq2_is_rc,
-                                seq2.data.len(),
-                            );
+                            // Validate before uniting
+                            validate_match(seq1, seq2, &seq1_data, &seq2.data, match_run_start1, match_run_start2, match_run_len);
+                            if debug_this {
+                                eprintln!("UNITING (end of op): seq1[{}..{}] <-> seq2[{}..{}] len={} (RC={})",
+                                    match_run_start1, match_run_start1 + match_run_len,
+                                    match_run_start2, match_run_start2 + match_run_len,
+                                    match_run_len, query_is_rc);
+                            }
+                            if query_is_rc {
+                                // Query (seq1) was RC'd for alignment
+                                self.union_find.unite_matching_region(
+                                    seq1.offset,
+                                    seq2.offset,
+                                    match_run_start1,
+                                    match_run_start2,
+                                    match_run_len,
+                                    true,  // seq1 is RC
+                                    seq1.data.len(),  // seq1 length for RC transformation
+                                );
+                            } else {
+                                // Normal forward-forward alignment
+                                self.union_find.unite_matching_region(
+                                    seq1.offset,
+                                    seq2.offset,
+                                    match_run_start1,
+                                    match_run_start2,
+                                    match_run_len,
+                                    false,
+                                    0,  // Not used for forward alignments
+                                );
+                            }
                         }
                         in_match_run = false;
                         match_run_len = 0;
@@ -464,15 +562,24 @@ impl SeqRush {
                         match ch {
                             'X' => { 
                                 // Mismatch
+                                if debug_this && pos1 < 100 {
+                                    eprintln!("  CIGAR {}X  pos1={} pos2={}", count, pos1, pos2);
+                                }
                                 pos1 += count; 
                                 pos2 += count; 
                             }
                             'I' => { 
                                 // Insertion in query (seq1) relative to target (seq2)
+                                if debug_this && pos1 < 100 {
+                                    eprintln!("  CIGAR {}I  pos1={} pos2={}", count, pos1, pos2);
+                                }
                                 pos1 += count; 
                             }
                             'D' => { 
                                 // Deletion in query (seq1) relative to target (seq2)
+                                if debug_this && pos1 < 100 {
+                                    eprintln!("  CIGAR {}D  pos1={} pos2={}", count, pos1, pos2);
+                                }
                                 pos2 += count; 
                             }
                             _ => {}
@@ -493,7 +600,7 @@ impl SeqRush {
             //     println!("    Final uniting match region: seq1[{}..{}] <-> seq2[{}..{}] (rc={})", 
             //             match_run_start1, match_run_start1 + match_run_len,
             //             match_run_start2, match_run_start2 + match_run_len,
-            //             seq2_is_rc);
+            //             query_is_rc);
             // }
             self.union_find.unite_matching_region(
                 seq1.offset,
@@ -501,7 +608,7 @@ impl SeqRush {
                 match_run_start1,
                 match_run_start2,
                 match_run_len,
-                seq2_is_rc,
+                query_is_rc,
                 seq2.data.len(),
             );
         }
