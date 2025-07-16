@@ -358,10 +358,14 @@ impl SeqRush {
         });
     }
     
-    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, query_is_rc: bool, _verbose: bool) {
+    fn process_alignment(&self, cigar: &str, seq1: &Sequence, seq2: &Sequence, min_match_len: usize, query_is_rc: bool, verbose: bool) {
+        if verbose && (seq1.id == seq2.id || seq1.id.contains("seq1") || seq2.id.contains("seq1")) {
+            eprintln!("Processing alignment: {} vs {} (query_is_rc: {})", seq1.id, seq2.id, query_is_rc);
+        }
         // IMPORTANT: query_is_rc means the QUERY (seq1) was reverse complemented for alignment
         // Debug specific alignment
-        let debug_this = (seq1.id.contains("299782605") || seq2.id.contains("299782605")) && query_is_rc;
+        let debug_this = (seq1.id.contains("299782605") || seq2.id.contains("299782605")) && query_is_rc || 
+                        (verbose && (seq1.id.contains("seq2") || seq2.id.contains("seq2")));
         // Add validation function
         let validate_match = |seq1: &Sequence, seq2: &Sequence, seq1_data: &[u8], seq2_data: &[u8], start1: usize, start2: usize, len: usize| {
             for i in 0..len {
@@ -602,6 +606,14 @@ impl SeqRush {
             //             match_run_start2, match_run_start2 + match_run_len,
             //             query_is_rc);
             // }
+            // Validate before uniting
+            validate_match(seq1, seq2, &seq1_data, &seq2.data, match_run_start1, match_run_start2, match_run_len);
+            if debug_this {
+                eprintln!("UNITING (final): seq1[{}..{}] <-> seq2[{}..{}] len={} (RC={})",
+                    match_run_start1, match_run_start1 + match_run_len,
+                    match_run_start2, match_run_start2 + match_run_len,
+                    match_run_len, query_is_rc);
+            }
             self.union_find.unite_matching_region(
                 seq1.offset,
                 seq2.offset,
@@ -609,7 +621,7 @@ impl SeqRush {
                 match_run_start2,
                 match_run_len,
                 query_is_rc,
-                seq2.data.len(),
+                seq1.data.len(),  // Fix: should be seq1 length for RC transformation
             );
         }
     }
@@ -716,13 +728,54 @@ impl SeqRush {
         let mut next_node_id = 1;
         
         // Build paths and discover nodes
+        let mut all_union_reps = std::collections::HashSet::new();
         for seq in &self.sequences {
             let mut path = Vec::new();
             
             for i in 0..seq.data.len() {
-                // Create bidirectional position (always forward for path traversal)
-                let pos = make_pos(seq.offset + i, false);
-                let union_rep = self.union_find.find(pos);
+                // Check both forward and reverse orientations to find the union representative
+                let pos_fwd = make_pos(seq.offset + i, false);
+                let pos_rev = make_pos(seq.offset + i, true);
+                
+                // Find union representatives for both orientations
+                let union_fwd = self.union_find.find(pos_fwd);
+                let union_rev = self.union_find.find(pos_rev);
+                
+                // Use the one that has been united with other sequences
+                // (has a different representative than itself)
+                if verbose && i < 5 {
+                    eprintln!("  [SEQRUSH_DEBUG] Path building: {} pos {} (offset {}) - fwd: {} -> {}, rev: {} -> {}", 
+                        seq.id, i, seq.offset + i, pos_fwd, union_fwd, pos_rev, union_rev);
+                    
+                    // Also check what seq1's reverse positions unite to
+                    if i < seq.data.len() {
+                        let seq1_offset = 0; // seq1 starts at offset 0
+                        let seq1_pos_rev = make_pos(seq1_offset + (11 - i), true); // RC mapping
+                        let seq1_union = self.union_find.find(seq1_pos_rev);
+                        eprintln!("    [SEQRUSH_DEBUG] seq1_rev pos {} -> union {}", seq1_pos_rev, seq1_union);
+                    }
+                }
+                
+                // Choose the union representative that has the most connections
+                // If a position was involved in an RC alignment, one of its orientations
+                // will have a different union representative than itself
+                let union_rep = if union_fwd != pos_fwd && union_rev != pos_rev {
+                    // Both orientations were united - choose the one with smaller ID
+                    // to ensure consistency across sequences
+                    std::cmp::min(union_fwd, union_rev)
+                } else if union_fwd != pos_fwd {
+                    union_fwd
+                } else if union_rev != pos_rev {
+                    union_rev
+                } else {
+                    // Neither orientation was united, use forward by default
+                    union_fwd
+                };
+                
+                if verbose && i < 5 {
+                    eprintln!("    -> chosen union_rep {}", union_rep);
+                }
+                all_union_reps.insert(union_rep);
                 
                 // if verbose {
                 //     eprintln!("DEBUG: seq {} pos {} -> union_rep {} (offset={}, rev={})", 
@@ -732,6 +785,9 @@ impl SeqRush {
                 // Get or create node ID for this union representative
                 let node_id = match union_to_node.get(&union_rep) {
                     Some(&id) => {
+                        if verbose && i < 5 {
+                            eprintln!("    [SEQRUSH_DEBUG] Found existing node {} for union_rep {}", id, union_rep);
+                        }
                         // Node already exists - verify consistency
                         if let Some(node) = graph.nodes.get_mut(&id) {
                             // Check if the base matches what we expect
@@ -755,6 +811,9 @@ impl SeqRush {
                         // First time seeing this union representative - create node
                         let id = next_node_id;
                         next_node_id += 1;
+                        if verbose && i < 5 {
+                            eprintln!("    [SEQRUSH_DEBUG] Creating new node {} for union_rep {}", id, union_rep);
+                        }
                         union_to_node.insert(union_rep, id);
                         
                         // Create node with single character sequence
@@ -792,6 +851,13 @@ impl SeqRush {
                 } else {
                     println!("✓ Path integrity verified for sequence {}", seq.id);
                 }
+            }
+            
+            eprintln!("Total unique union representatives: {}", all_union_reps.len());
+            if all_union_reps.len() <= 20 {
+                let mut reps: Vec<_> = all_union_reps.iter().collect();
+                reps.sort();
+                eprintln!("Union representatives: {:?}", reps);
             }
         }
         

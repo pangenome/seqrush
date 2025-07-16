@@ -19,7 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 lib_wfa2 = { git = "https://github.com/ekg/lib_wfa2", rev = "819b82cd842aabedcb962fd5b82380fe454234f6" }
-allwave = { git = "https://github.com/pangenome/allwave", rev = "b382cdb" }
+allwave = { git = "https://github.com/pangenome/allwave", rev = "788acb0cfbacc00dd4d86663bfe87ba5d39d02c0" }
 union-find = "0.3"
 uf_rush = "0.2"
 rayon = "1.7"
