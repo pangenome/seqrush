@@ -11,6 +11,7 @@ pub mod cigar_analysis;
 pub mod inversion_aware_seqrush;
 pub mod wfa;
 pub mod seqrush_clean;
+pub mod bidirected_builder;
 
 #[cfg(test)]
 mod compaction_tests;

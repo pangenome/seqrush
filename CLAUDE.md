@@ -1,12 +1,11 @@
 # SeqRush Development - Graph Construction Investigation
 
-## Problem Statement - RESOLVED
+## Problem Statement - BIDIRECTED GRAPH IMPLEMENTED
 
-SeqRush was producing graphs with significantly more nodes than seqwish when processing the same input:
-- SeqRush (original): 1785 nodes (after compaction)
-- SeqRush (after fixes): 466 nodes ✓
-- Seqwish: 471 nodes
-- Both tools use identical PAF alignments
+SeqRush now correctly handles bidirected graphs but still produces more nodes than seqwish:
+- SeqRush (current with bidirected graph): 7440 nodes (single-base nodes)
+- Seqwish: 476 nodes (variable-length compacted nodes)
+- Both tools process identical alignments (verified by running seqwish on SeqRush's PAF)
 
 ## Root Cause Analysis
 
@@ -26,10 +25,10 @@ SeqRush was producing graphs with significantly more nodes than seqwish when pro
 
 ### Core Issue
 The fundamental difference between seqrush and seqwish:
-- **Seqrush**: Creates one node per union component (2397 nodes)
-- **Seqwish**: Builds a "graph sequence" through transitive closure, then identifies nodes based on graph topology (471 nodes)
+- **Seqrush**: Creates one node per base position (after union-find)
+- **Seqwish**: Creates variable-length nodes through compaction during graph construction
 
-The union-find is working correctly, but we need a different approach to node creation that considers the graph structure, not just union components.
+The bidirected graph implementation is working correctly, but SeqRush creates single-base nodes while seqwish performs compaction to create longer nodes.
 
 ## Seqwish Algorithm Understanding
 
@@ -44,6 +43,33 @@ The union-find is working correctly, but we need a different approach to node cr
 - Self-alignments establish sequence backbone
 - Reverse complement handling requires careful position mapping
 - All positions in a union component must have compatible bases
+
+## Bidirected Graph Implementation
+
+### The Critical Bug: Bidirected Graph Support
+**SeqRush was failing to handle reverse complement alignments correctly!**
+
+When sequences align via reverse complement:
+- Simple unidirectional graphs cannot represent these relationships
+- Paths would incorrectly traverse nodes "backwards"
+- This created invalid graphs where sequences couldn't be reconstructed
+
+### Solution: Bidirected Graph
+Implemented full bidirected graph support following seqwish's approach:
+1. **Handle type**: Encodes node ID + orientation in 64-bit value (LSB = orientation)
+2. **Bidirected edges**: Connect oriented node references (e.g., 5+ → 6-, meaning forward strand of node 5 connects to reverse strand of node 6)
+3. **Oriented paths**: Sequences traverse nodes with specific orientations (e.g., "1+,2+,3-,4+" means traverse nodes 1,2 forward, node 3 reverse, node 4 forward)
+
+### Implementation Details
+- Created `bidirected_builder.rs` to build bidirected graphs from union-find results
+- Modified `write_gfa` to output oriented edges and paths
+- Handles both forward and reverse complement alignments correctly
+- Validated with test cases showing proper sequence reconstruction
+
+### Current Status
+- ✅ Bidirected graph correctly handles RC alignments
+- ✅ Produces valid GFA with oriented paths
+- ❌ Still creates too many nodes compared to seqwish (needs compaction)
 
 ## Test Suite Design
 
@@ -109,18 +135,100 @@ odgi stats -i b.gfa -S
 3. Paths correctly preserve input sequences ✓
 4. Graph is properly connected ✓
 
-## Key Insights - RESOLVED
+## Key Insights - UPDATED
 
-1. **Union-find was working correctly**: The algorithm was sound, issue was in alignment processing
+1. **Bidirected graph support added**: SeqRush now correctly handles reverse complement alignments
 2. **Self-alignments are critical**: Fixed by changing `exclude_self` from true to false
 3. **PAF strand interpretation**: Fixed by recognizing that query strand '-' means query is RC'd
-4. **Final result**: 466 nodes (SeqRush) vs 471 nodes (seqwish) - within 1% ✓
+4. **Remaining issue**: Node count difference due to compaction - SeqRush creates single-base nodes while seqwish creates variable-length nodes
 
-## Conclusion
+## Current Understanding
 
-The original hypothesis about needing a "graph sequence" approach was incorrect. SeqRush's algorithm of creating one node per union component is fundamentally sound and matches seqwish's approach. The issues were in the alignment processing:
+### The Critical Bug: Bidirected Graph Support
 
-1. **Missing self-alignments** caused excessive fragmentation
-2. **Incorrect PAF strand interpretation** created spurious matches and a tangled graph
+**SeqRush fails to handle reverse complement alignments correctly!**
 
-With these fixes, SeqRush now produces graphs nearly identical to seqwish (466 vs 471 nodes), demonstrating that the core algorithm was correct all along.
+Test with sequences where only RC alignment exists:
+- Input: "AAAAACCCCCTTTTT" and "AAAAAGGGGGTTTTTT" (RC of each other)
+- Seqwish output: Proper bidirected graph with 2 nodes and reverse paths
+- SeqRush output: Invalid graph with forward path going BACKWARDS through nodes!
+
+**The fundamental issue:**
+1. SeqRush uses a simple unidirectional `Graph` structure
+2. All edges are written as `L from + to + 0M` (always forward)
+3. All path steps are written as `node+` (always forward)
+4. The bidirected nature of sequence graphs is completely lost
+
+**Result:** When RC alignments exist, SeqRush creates invalid graphs where paths traverse nodes in the wrong direction to try to represent the RC relationship.
+
+### How Seqwish Handles RC Alignments (from source analysis)
+
+1. **Position encoding**: Each position stores offset + orientation in 64-bit value
+   - LSB = orientation (0=forward, 1=reverse)
+   - Upper bits = position offset
+
+2. **PAF parsing**: When strand field is '-', query was reverse complemented
+   ```cpp
+   bool q_rev = !paf.query_target_same_strand;
+   pos_t q_pos = make_pos_t(q_all_pos, q_rev);
+   pos_t t_pos = make_pos_t(t_all_pos, false);
+   ```
+
+3. **Bidirectional alignment storage**: Both directions stored in interval tree
+   ```cpp
+   if (is_rev(q_pos)) {
+       // Store bidirectional mappings for RC alignments
+       aln_iitree.add(..., make_pos_t(..., true));
+   }
+   ```
+
+4. **Graph construction**: Creates bidirected edges with proper orientations
+   - Nodes can be traversed in both directions
+   - Paths include orientation for each step (e.g., "1+,2-,3+")
+
+### Key Insight
+
+The core issue isn't about node counts or compaction - it's about **bidirected graph support**. SeqRush's simple `Graph` structure cannot represent reverse complement relationships, leading to invalid graphs.
+
+## Solution Approach
+
+### Required Changes:
+
+1. **Use BidirectedGraph instead of Graph**
+   - Already exists in `src/bidirected_graph.rs` and `src/bidirected_ops.rs`
+   - Supports Handle objects with orientation
+   - Can write proper GFA with orientations
+
+2. **Fix path construction**
+   - Track orientation when building paths from union-find
+   - When a position was united via RC alignment, use reverse orientation
+   - Path steps should be Handle objects, not just node IDs
+
+3. **Fix union-find usage**
+   - Current code correctly unites positions with orientations
+   - But graph construction ignores this information
+   - Need to preserve orientation when mapping positions to nodes
+
+## Implementation Steps
+
+1. Modify `build_initial_graph` to return `BidirectedGraph`
+2. Track position orientations when creating nodes and paths
+3. Update GFA writing to use `BidirectedGraph::write_gfa`
+4. Test with RC alignments to verify correctness
+
+## Current Status - Bidirected Graph Implemented
+
+The bidirected graph implementation has been successfully completed:
+
+1. **✅ Created `bidirected_builder.rs`** - Builds bidirected graphs from union-find results
+2. **✅ Modified SeqRush pipeline** - Now uses BidirectedGraph throughout
+3. **✅ Fixed orientation detection** - Correctly determines path orientations based on alignments
+4. **✅ Validated with test cases** - RC alignments now produce valid bidirected graphs
+
+### Remaining Work
+
+The only remaining issue is the node count difference:
+- SeqRush: 7440 single-base nodes
+- Seqwish: 476 variable-length nodes
+
+This is due to seqwish performing compaction during graph construction. To achieve full 1:1 parity, SeqRush would need to implement similar compaction logic that merges linear chains of nodes.

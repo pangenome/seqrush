@@ -1,0 +1,113 @@
+warning: unused variable: `num_matches_initial`
+   --> src/seqrush.rs:809:64
+    |
+809 |         let (query_start, query_end, target_start, target_end, num_matches_initial, block_length_initial) = 
+    |                                                                ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_num_matches_initial`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `block_length_initial`
+   --> src/seqrush.rs:809:85
+    |
+809 |         let (query_start, query_end, target_start, target_end, num_matches_initial, block_length_initial) = 
+    |                                                                                     ^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_block_length_initial`
+
+warning: value assigned to `count` is never read
+    --> src/seqrush.rs:1192:17
+     |
+1192 |         let mut count = 0;
+     |                 ^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+     = note: `#[warn(unused_assignments)]` on by default
+
+warning: variable `query_aligned_end` is assigned to, but never used
+    --> src/seqrush.rs:1197:17
+     |
+1197 |         let mut query_aligned_end = 0;  // Last position where both sequences were aligned
+     |                 ^^^^^^^^^^^^^^^^^
+     |
+     = note: consider using `_query_aligned_end` instead
+
+warning: variable `target_aligned_end` is assigned to, but never used
+    --> src/seqrush.rs:1198:17
+     |
+1198 |         let mut target_aligned_end = 0;
+     |                 ^^^^^^^^^^^^^^^^^^
+     |
+     = note: consider using `_target_aligned_end` instead
+
+warning: value assigned to `query_aligned_end` is never read
+    --> src/seqrush.rs:1255:21
+     |
+1255 |                     query_aligned_end = query_pos;
+     |                     ^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `target_aligned_end` is never read
+    --> src/seqrush.rs:1256:21
+     |
+1256 |                     target_aligned_end = target_pos;
+     |                     ^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `query_aligned_end` is never read
+    --> src/seqrush.rs:1262:21
+     |
+1262 |                     query_aligned_end = query_pos;
+     |                     ^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `target_aligned_end` is never read
+    --> src/seqrush.rs:1263:21
+     |
+1263 |                     target_aligned_end = target_pos;
+     |                     ^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: unused variable: `query_end`
+    --> src/seqrush.rs:1281:13
+     |
+1281 |         let query_end = query_pos.min(query_len);
+     |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_query_end`
+
+warning: unused variable: `target_end`
+    --> src/seqrush.rs:1282:13
+     |
+1282 |         let target_end = target_pos.min(target_len);
+     |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_target_end`
+
+warning: methods `trim_cigar_to_sequences`, `calculate_cigar_lengths`, and `check_excessive_terminal_indels` are never used
+   --> src/seqrush.rs:670:8
+    |
+198 | impl SeqRush {
+    | ------------ methods in this implementation
+...
+670 |     fn trim_cigar_to_sequences(&self, cigar: &str, query_len: usize, target_len: usize) -> String {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+909 |     fn calculate_cigar_lengths(&self, cigar: &str) -> (usize, usize) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+939 |     fn check_excessive_terminal_indels(&self, cigar: &str) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `seqrush` (lib) generated 12 warnings
+warning: unused import: `Write`
+ --> src/bin/simple_align.rs:2:35
+  |
+2 | use std::io::{BufReader, BufRead, Write};
+  |                                   ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: `seqrush` (bin "simple_align") generated 1 warning (run `cargo fix --bin "simple_align"` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 0.01s
+     Running `target/release/simple_align x.fa`
+Loaded 2 sequences

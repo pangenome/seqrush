@@ -7,7 +7,9 @@ use std::io::{BufWriter, Write, BufRead, BufReader};
 use std::sync::Mutex;
 use crate::graph_ops::{Graph, Node, Edge};
 use crate::bidirected_union_find::BidirectedUnionFind;
-use crate::pos::{Pos, make_pos};
+use crate::pos::{Pos, make_pos, is_rev, offset};
+use crate::bidirected_graph::{Handle, BiNode};
+use crate::bidirected_ops::BidirectedGraph;
 use allwave::{AllPairIterator, AlignmentParams, SparsificationStrategy};
 
 #[derive(Parser)]
@@ -16,6 +18,10 @@ pub struct Args {
     /// Input FASTA file
     #[arg(short, long)]
     pub sequences: String,
+    
+    /// Input PAF file (optional, if not provided will compute alignments internally)
+    #[arg(short = 'p', long)]
+    pub paf: Option<String>,
     
     /// Output GFA file
     #[arg(short, long, default_value = "output.gfa")]
@@ -218,8 +224,103 @@ impl SeqRush {
     }
     
     pub fn align_and_unite(&self, args: &Args) {
-        // Use the new allwave-based implementation
-        self.align_and_unite_with_allwave(args);
+        if let Some(paf_path) = &args.paf {
+            // Read alignments from PAF file
+            self.align_and_unite_from_paf(paf_path, args);
+        } else {
+            // Use the new allwave-based implementation
+            self.align_and_unite_with_allwave(args);
+        }
+    }
+    
+    pub fn align_and_unite_from_paf(&self, paf_path: &str, args: &Args) {
+        let verbose = args.verbose;
+        if verbose {
+            println!("Reading alignments from PAF file: {}", paf_path);
+        }
+        
+        // Build a map from sequence names to indices
+        let seq_name_to_idx: HashMap<String, usize> = self.sequences.iter()
+            .enumerate()
+            .map(|(idx, seq)| (seq.id.clone(), idx))
+            .collect();
+        
+        // Read PAF file
+        let file = File::open(paf_path).expect("Failed to open PAF file");
+        let reader = BufReader::new(file);
+        let mut alignment_count = 0;
+        
+        for line in reader.lines() {
+            let line = line.expect("Failed to read PAF line");
+            if line.is_empty() {
+                continue;
+            }
+            
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 12 {
+                eprintln!("Warning: Invalid PAF line (not enough fields): {}", line);
+                continue;
+            }
+            
+            // Parse PAF fields
+            let query_name = fields[0];
+            let query_len = fields[1].parse::<usize>().unwrap();
+            let query_start = fields[2].parse::<usize>().unwrap();
+            let query_end = fields[3].parse::<usize>().unwrap();
+            let query_strand = fields[4];
+            let target_name = fields[5];
+            let target_len = fields[6].parse::<usize>().unwrap();
+            let target_start = fields[7].parse::<usize>().unwrap();
+            let target_end = fields[8].parse::<usize>().unwrap();
+            
+            // Find CIGAR string in optional fields
+            let mut cigar = None;
+            for field in &fields[12..] {
+                if field.starts_with("cg:Z:") {
+                    cigar = Some(&field[5..]);
+                    break;
+                }
+            }
+            
+            let cigar = cigar.unwrap_or_else(|| {
+                eprintln!("Warning: No CIGAR string found in PAF line: {}", line);
+                ""
+            });
+            
+            // Look up sequences by name
+            let query_idx = seq_name_to_idx.get(query_name);
+            let target_idx = seq_name_to_idx.get(target_name);
+            
+            if query_idx.is_none() || target_idx.is_none() {
+                eprintln!("Warning: Unknown sequence name(s) in PAF: {} or {}", query_name, target_name);
+                continue;
+            }
+            
+            let query_idx = *query_idx.unwrap();
+            let target_idx = *target_idx.unwrap();
+            let query_is_rc = query_strand == "-";
+            
+            if verbose {
+                println!("Processing alignment: {} vs {} (query_is_rc: {})", 
+                         query_name, target_name, query_is_rc);
+            }
+            
+            // Process the alignment
+            self.process_alignment(
+                cigar,
+                &self.sequences[query_idx],
+                &self.sequences[target_idx],
+                args.min_match_length,
+                query_is_rc,
+                verbose
+            );
+            
+            alignment_count += 1;
+        }
+        
+        if verbose {
+            println!("Processed {} alignments from PAF file", alignment_count);
+        }
     }
     
     pub fn align_and_unite_with_allwave(&self, args: &Args) {
@@ -630,8 +731,22 @@ impl SeqRush {
         let output_path = &args.output;
         let verbose = args.verbose;
         let test_mode = args.test_mode;
-        // Build initial graph from union-find
-        let mut graph = self.build_initial_graph(verbose)?;
+        
+        // Build bidirected graph from union-find
+        let bi_graph = self.build_bidirected_graph(verbose)?;
+        
+        // Write bidirected graph directly
+        let file = File::create(output_path)?;
+        let mut writer = BufWriter::new(file);
+        bi_graph.write_gfa(&mut writer)?;
+        
+        println!("Graph written to {}: {} nodes, {} edges", 
+                 output_path, bi_graph.nodes.len(), bi_graph.edges.len());
+        
+        return Ok(());
+        
+        // TODO: Remove old code below once bidirected graph is fully working
+        let mut graph = self.bidirected_to_simple_graph(bi_graph);
         
         if verbose {
             println!("Initial graph: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
@@ -721,9 +836,16 @@ impl SeqRush {
     }
     
     fn build_initial_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {
+        // Build bidirected graph first, then convert to simple graph for compatibility
+        let bi_graph = self.build_bidirected_graph(verbose)?;
+        // For now, convert back to simple graph until we update the rest of the pipeline
+        Ok(self.bidirected_to_simple_graph(bi_graph))
+    }
+    
+    fn build_old_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {
         let mut graph = Graph::new();
         
-        // Track which unions we've seen and their node IDs
+        // Track which union representatives we've seen and their node IDs
         let mut union_to_node: HashMap<Pos, usize> = HashMap::new();
         let mut next_node_id = 1;
         
