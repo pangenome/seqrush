@@ -17,6 +17,284 @@ impl Default for BidirectedGraph {
 }
 
 impl BidirectedGraph {
+    /// Compact the graph by merging linear chains of nodes
+    pub fn compact(&mut self) {
+        // Find simple components (linear chains)
+        let components = self.find_simple_components();
+        
+        // Merge each component
+        for component in components {
+            if component.len() >= 2 {
+                self.merge_component(&component);
+            }
+        }
+    }
+    
+    /// Find simple components (linear chains that can be merged)
+    fn find_simple_components(&self) -> Vec<Vec<Handle>> {
+        let mut components = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut merged_nodes = std::collections::HashSet::new();
+        
+        // Build adjacency lists
+        let mut forward_edges: std::collections::HashMap<Handle, Vec<Handle>> = std::collections::HashMap::new();
+        let mut backward_edges: std::collections::HashMap<Handle, Vec<Handle>> = std::collections::HashMap::new();
+        
+        for edge in &self.edges {
+            forward_edges.entry(edge.from).or_default().push(edge.to);
+            backward_edges.entry(edge.to).or_default().push(edge.from);
+            
+            // Also consider the implied reverse edge
+            forward_edges.entry(edge.to.flip()).or_default().push(edge.from.flip());
+            backward_edges.entry(edge.from.flip()).or_default().push(edge.to.flip());
+        }
+        
+        // Check if two handles are perfect neighbors (can be merged)
+        let are_perfect_neighbors = |from: Handle, to: Handle| -> bool {
+            // Check all paths
+            for path in &self.paths {
+                let mut from_to_transitions = 0;
+                let mut from_visits = 0;
+                
+                for i in 0..path.steps.len() {
+                    if path.steps[i] == from {
+                        from_visits += 1;
+                        if i + 1 < path.steps.len() {
+                            if path.steps[i + 1] == to {
+                                from_to_transitions += 1;
+                            } else {
+                                // Path continues but doesn't go to 'to'
+                                return false;
+                            }
+                        } else {
+                            // Path ends at 'from'
+                            return false;
+                        }
+                    }
+                }
+                
+                // If we visited 'from' but didn't always go to 'to', not perfect
+                if from_visits > 0 && from_visits != from_to_transitions {
+                    return false;
+                }
+            }
+            
+            true
+        };
+        
+        // Find linear chains
+        for handle in self.nodes.keys().flat_map(|&id| vec![Handle::forward(id), Handle::reverse(id)]) {
+            if visited.contains(&handle) {
+                continue;
+            }
+            
+            // Check if this could be the start of a chain
+            let in_degree = backward_edges.get(&handle).map(|v| v.len()).unwrap_or(0);
+            let out_degree = forward_edges.get(&handle).map(|v| v.len()).unwrap_or(0);
+            
+            if out_degree == 1 {
+                // Try to extend a chain from here
+                let mut chain = vec![handle];
+                visited.insert(handle);
+                
+                let mut current = handle;
+                while let Some(nexts) = forward_edges.get(&current) {
+                    if nexts.len() != 1 {
+                        break;
+                    }
+                    
+                    let next = nexts[0];
+                    let next_in_degree = backward_edges.get(&next).map(|v| v.len()).unwrap_or(0);
+                    
+                    if next_in_degree != 1 || visited.contains(&next) {
+                        break;
+                    }
+                    
+                    // Check if they are perfect neighbors
+                    if !are_perfect_neighbors(current, next) {
+                        break;
+                    }
+                    
+                    chain.push(next);
+                    visited.insert(next);
+                    current = next;
+                    
+                    // Check next's out degree
+                    let next_out_degree = forward_edges.get(&next).map(|v| v.len()).unwrap_or(0);
+                    if next_out_degree != 1 {
+                        break;
+                    }
+                }
+                
+                if chain.len() >= 2 {
+                    // Check if any node in this chain has already been merged
+                    let mut already_merged = false;
+                    for &h in &chain {
+                        if merged_nodes.contains(&h.node_id()) {
+                            already_merged = true;
+                            break;
+                        }
+                    }
+                    
+                    if !already_merged {
+                        // Mark all nodes in this chain as merged
+                        for &h in &chain {
+                            merged_nodes.insert(h.node_id());
+                        }
+                        components.push(chain);
+                    }
+                }
+            }
+        }
+        
+        components
+    }
+    
+    /// Merge a component (chain of handles) into a single node
+    fn merge_component(&mut self, handles: &[Handle]) {
+        if handles.len() < 2 {
+            return;
+        }
+        
+        // Create new sequence by concatenating
+        let mut new_sequence = Vec::new();
+        for &handle in handles {
+            if let Some(node) = self.nodes.get(&handle.node_id()) {
+                if handle.is_reverse() {
+                    new_sequence.extend(crate::bidirected_graph::reverse_complement(&node.sequence));
+                } else {
+                    new_sequence.extend(&node.sequence);
+                }
+            }
+        }
+        
+        // Create new node
+        let new_node_id = self.next_node_id();
+        self.add_node(new_node_id, new_sequence);
+        
+        // Determine the orientation of the new node based on the chain
+        // If the chain starts with a reverse handle, the new node represents that reverse orientation
+        let chain_is_reverse = handles[0].is_reverse();
+        
+        // Create mapping from old handles to new handle
+        let mut handle_map = std::collections::HashMap::new();
+        for (i, &handle) in handles.iter().enumerate() {
+            // Map this handle to the new node
+            // The orientation depends on whether the chain is reverse and the handle's orientation
+            let new_handle = if chain_is_reverse {
+                // If chain is reverse and handle is reverse, they cancel out
+                if handle.is_reverse() {
+                    Handle::forward(new_node_id)
+                } else {
+                    Handle::reverse(new_node_id)
+                }
+            } else {
+                // Chain is forward
+                if handle.is_reverse() {
+                    Handle::reverse(new_node_id)
+                } else {
+                    Handle::forward(new_node_id)
+                }
+            };
+            handle_map.insert(handle, new_handle);
+        }
+        
+        // Track what the first and last handles connect to
+        let first_handle = handles[0];
+        let last_handle = handles[handles.len() - 1];
+        
+        // Find edges to reconnect
+        let mut edges_to_add = Vec::new();
+        
+        for edge in &self.edges {
+            // Check edges entering the chain
+            if edge.to == first_handle && !handles.contains(&edge.from) {
+                let new_to = handle_map[&first_handle];
+                edges_to_add.push((edge.from, new_to));
+            }
+            // Check edges leaving the chain
+            if edge.from == last_handle && !handles.contains(&edge.to) {
+                let new_from = handle_map[&last_handle];
+                edges_to_add.push((new_from, edge.to));
+            }
+            // Check for self-loops within the chain
+            if edge.from == last_handle && edge.to == first_handle {
+                // Loop from end to beginning
+                let new_from = handle_map[&last_handle];
+                let new_to = handle_map[&first_handle];
+                if new_from.node_id() == new_to.node_id() {
+                    // Self-loop on new node
+                    edges_to_add.push((new_from, new_to));
+                }
+            }
+        }
+        
+        // Update paths
+        for path in &mut self.paths {
+            
+            let mut new_steps = Vec::new();
+            let mut i = 0;
+            
+            while i < path.steps.len() {
+                let current_handle = path.steps[i];
+                
+                // Check if this handle is in our chain
+                if let Some(&new_handle) = handle_map.get(&current_handle) {
+                    // This handle is being replaced
+                    // Check if we're at the start of the complete chain
+                    let mut is_chain_start = true;
+                    if i + handles.len() <= path.steps.len() {
+                        for j in 0..handles.len() {
+                            if path.steps[i + j] != handles[j] {
+                                is_chain_start = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        is_chain_start = false;
+                    }
+                    
+                    if is_chain_start {
+                        // We found the complete chain, replace it with the new handle
+                        new_steps.push(new_handle);
+                        i += handles.len();
+                    } else {
+                        // This handle is part of the chain but we're not at the chain start
+                        // This shouldn't happen if paths are coherent
+                        eprintln!("WARNING: Found handle {} in chain but not at chain start in path {}", 
+                                 current_handle, path.name);
+                        new_steps.push(current_handle);
+                        i += 1;
+                    }
+                } else {
+                    // This handle is not in the chain, keep it
+                    new_steps.push(current_handle);
+                    i += 1;
+                }
+            }
+            
+            path.steps = new_steps;
+        }
+        
+        // Remove old nodes
+        for &handle in handles {
+            self.nodes.remove(&handle.node_id());
+        }
+        
+        // Remove old edges
+        self.edges.retain(|edge| {
+            !handles.iter().any(|&h| h.node_id() == edge.from.node_id() || h.node_id() == edge.to.node_id())
+        });
+        
+        // Add new edges
+        for (from, to) in edges_to_add {
+            self.add_edge(from, to);
+        }
+    }
+    
+    fn next_node_id(&self) -> usize {
+        self.nodes.keys().max().copied().unwrap_or(0) + 1
+    }
     pub fn new() -> Self {
         BidirectedGraph {
             nodes: HashMap::new(),

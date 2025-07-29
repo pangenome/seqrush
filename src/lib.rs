@@ -12,6 +12,7 @@ pub mod inversion_aware_seqrush;
 pub mod wfa;
 pub mod seqrush_clean;
 pub mod bidirected_builder;
+pub mod range_builder;
 
 #[cfg(test)]
 mod compaction_tests;
