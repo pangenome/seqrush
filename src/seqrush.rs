@@ -56,7 +56,7 @@ pub struct Args {
     pub test_mode: bool,
     
     /// Disable node compaction (compaction merges linear chains of nodes)
-    #[arg(long = "no-compact", default_value = "false")]
+    #[arg(long = "no-compact", default_value = "true")]
     pub no_compact: bool,
     
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
@@ -762,6 +762,8 @@ impl SeqRush {
         let graph_size_before = self.compute_graph_size(&bi_graph);
         
         // Apply compaction unless disabled
+        // COMPACTION DISABLED - Using single-base nodes for mathematical correctness
+        /*
         if !args.no_compact {
             if verbose {
                 println!("Applying graph compaction...");
@@ -804,6 +806,7 @@ impl SeqRush {
                 println!("Validation passed: all paths preserved, graph size unchanged");
             }
         }
+        */
         
         // Also validate that paths match original sequences
         // TODO: Fix path validation - there are issues with how PAF alignments are processed
