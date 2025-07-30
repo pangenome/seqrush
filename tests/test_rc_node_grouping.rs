@@ -28,6 +28,8 @@ fn test_rc_sequences_share_nodes() {
         sparsification: "1.0".to_string(),
         output_alignments: None,
         validate_paf: false,
+        paf: None,
+        seqwish_style: false,
     };
     
     let output_path = args.output.clone();
@@ -102,6 +104,8 @@ fn test_node_sequence_consistency() {
         sparsification: "1.0".to_string(),
         output_alignments: None,
         validate_paf: false,
+        paf: None,
+        seqwish_style: false,
     };
     
     let output_path = args.output.clone();

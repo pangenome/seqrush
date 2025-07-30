@@ -1,7 +1,6 @@
-use crate::bidirected_graph::{Handle, BiNode};
+use crate::bidirected_graph::Handle;
 use crate::bidirected_ops::BidirectedGraph;
-use crate::bidirected_union_find::BidirectedUnionFind;
-use crate::pos::{Pos, make_pos, is_rev, offset};
+use crate::pos::{Pos, make_pos, offset};
 use crate::graph_ops::{Graph, Node, Edge};
 use crate::seqrush::{SeqRush, Sequence};
 use std::collections::HashMap;
@@ -22,54 +21,21 @@ impl SeqRush {
             for i in 0..seq.data.len() {
                 let global_pos = seq.offset + i;
                 
-                // Check both forward and reverse orientations
+                // Since forward and reverse orientations are already united,
+                // we just need to find the union representative for the forward orientation
                 let pos_fwd = make_pos(global_pos, false);
-                let pos_rev = make_pos(global_pos, true);
+                let union_rep = self.union_find.find(pos_fwd);
                 
-                // Find union representatives
-                let union_fwd = self.union_find.find(pos_fwd);
-                let union_rev = self.union_find.find(pos_rev);
-                
-                // Determine which orientation was actually united and what orientation to use
-                let (chosen_union, path_orientation) = if union_fwd != pos_fwd && union_rev != pos_rev {
-                    // Both orientations were united - need to determine which to use
-                    // If forward maps to a reverse position, we should traverse in reverse
-                    if is_rev(union_fwd) {
-                        (union_rev, true)  // Use reverse orientation in path
-                    } else {
-                        (union_fwd, false) // Use forward orientation in path
-                    }
-                } else if union_fwd != pos_fwd {
-                    // Forward position was united
-                    (union_fwd, is_rev(union_fwd))  // Use reverse if it maps to reverse
-                } else if union_rev != pos_rev {
-                    // Reverse position was united
-                    (union_rev, true)  // We're going through reverse
-                } else {
-                    // Neither united, use forward by default
-                    (union_fwd, false)
-                };
+                // The path orientation is always forward since we're following the sequence
+                let _path_orientation = false;
                 
                 if verbose && i < 5 {
-                    eprintln!("  [BIDIRECTED] {} pos {} - chosen orientation: {}, union: {}", 
-                        seq.id, i, if path_orientation { '-' } else { '+' }, chosen_union);
+                    eprintln!("  [BIDIRECTED] {} pos {} - union: {}", 
+                        seq.id, i, union_rep);
                 }
                 
-                // Get the canonical union representative (always use the smaller offset)
-                let canonical_union = if is_rev(chosen_union) {
-                    // If the union rep is reverse, its canonical form might be forward
-                    let offset_val = offset(chosen_union);
-                    let forward_check = make_pos(offset_val, false);
-                    let forward_union = self.union_find.find(forward_check);
-                    if forward_union == chosen_union {
-                        // Both orientations map to same union, use forward
-                        forward_check
-                    } else {
-                        chosen_union
-                    }
-                } else {
-                    chosen_union
-                };
+                // Use the union representative as the canonical form
+                let canonical_union = union_rep;
                 
                 // Get or create node ID
                 let node_id = match union_to_node.get(&canonical_union) {
@@ -82,12 +48,7 @@ impl SeqRush {
                         // Create node with the base from the canonical position
                         let base = if let Some(source_seq) = self.find_sequence_for_position(canonical_union) {
                             let local_offset = offset(canonical_union) - source_seq.offset;
-                            if is_rev(canonical_union) {
-                                // Get reverse complement base
-                                crate::pos::rc_base(source_seq.data[local_offset])
-                            } else {
-                                source_seq.data[local_offset]
-                            }
+                            source_seq.data[local_offset]
                         } else {
                             seq.data[i] // Fallback to current sequence's base
                         };
@@ -97,8 +58,8 @@ impl SeqRush {
                     }
                 };
                 
-                // Add handle with correct orientation to path
-                let handle = Handle::new(node_id, path_orientation);
+                // Add handle with forward orientation to path
+                let handle = Handle::new(node_id, false);
                 path_handles.push(handle);
             }
             

@@ -42,7 +42,9 @@ fn test_real_inversion_case() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     println!("Testing real inversion case...");
     println!("Reference: ATCG[AAAA]GCTA");
@@ -82,7 +84,9 @@ fn test_larger_inversion_with_unique_content() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     println!("\nTesting larger inversion with unique content...");
     run_inversion_aware_seqrush(args).unwrap();
@@ -122,7 +126,9 @@ fn test_inversion_with_snps() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     println!("\nTesting inversion detection with SNPs...");
     run_inversion_aware_seqrush(args).unwrap();

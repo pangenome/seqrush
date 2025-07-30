@@ -7,8 +7,7 @@ use std::io::{BufWriter, Write, BufRead, BufReader};
 use std::sync::Mutex;
 use crate::graph_ops::{Graph, Node, Edge};
 use crate::bidirected_union_find::BidirectedUnionFind;
-use crate::pos::{Pos, make_pos, is_rev, offset};
-use crate::bidirected_graph::{Handle, BiNode};
+use crate::pos::{Pos, make_pos};
 use crate::bidirected_ops::BidirectedGraph;
 use allwave::{AllPairIterator, AlignmentParams, SparsificationStrategy};
 use sha2::{Sha256, Digest};
@@ -209,6 +208,17 @@ impl SeqRush {
         let total_length = sequences.iter().map(|s| s.data.len()).sum();
         let union_find = BidirectedUnionFind::new(total_length);
         
+        // CRITICAL: Unite forward and reverse orientations of each position
+        // This ensures we work with a single "strand" where alignments can happen in both orientations
+        for seq in &sequences {
+            for i in 0..seq.data.len() {
+                let global_pos = seq.offset + i;
+                let pos_fwd = make_pos(global_pos, false);
+                let pos_rev = make_pos(global_pos, true);
+                union_find.unite(pos_fwd, pos_rev);
+            }
+        }
+        
         Self {
             sequences,
             total_length,
@@ -269,14 +279,14 @@ impl SeqRush {
             
             // Parse PAF fields
             let query_name = fields[0];
-            let query_len = fields[1].parse::<usize>().unwrap();
-            let query_start = fields[2].parse::<usize>().unwrap();
-            let query_end = fields[3].parse::<usize>().unwrap();
+            let _query_len = fields[1].parse::<usize>().unwrap();
+            let _query_start = fields[2].parse::<usize>().unwrap();
+            let _query_end = fields[3].parse::<usize>().unwrap();
             let query_strand = fields[4];
             let target_name = fields[5];
-            let target_len = fields[6].parse::<usize>().unwrap();
-            let target_start = fields[7].parse::<usize>().unwrap();
-            let target_end = fields[8].parse::<usize>().unwrap();
+            let _target_len = fields[6].parse::<usize>().unwrap();
+            let _target_start = fields[7].parse::<usize>().unwrap();
+            let _target_end = fields[8].parse::<usize>().unwrap();
             
             // Find CIGAR string in optional fields
             let mut cigar = None;
@@ -735,7 +745,7 @@ impl SeqRush {
     fn write_gfa(&self, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let output_path = &args.output;
         let verbose = args.verbose;
-        let test_mode = args.test_mode;
+        let _test_mode = args.test_mode;
         
         // Build bidirected graph from union-find
         let mut bi_graph = self.build_bidirected_graph(verbose)?;
@@ -799,95 +809,6 @@ impl SeqRush {
         
         println!("Graph written to {}: {} nodes, {} edges", 
                  output_path, bi_graph.nodes.len(), bi_graph.edges.len());
-        
-        return Ok(());
-        
-        // TODO: Remove old code below once bidirected graph is fully working
-        let mut graph = self.bidirected_to_simple_graph(bi_graph);
-        
-        if verbose {
-            println!("Initial graph: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
-        }
-        
-        // Prepare original sequences for verification
-        let original_sequences: Vec<(String, Vec<u8>)> = self.sequences.iter()
-            .map(|seq| (seq.id.clone(), seq.data.clone()))
-            .collect();
-        
-        // Verify paths before compaction (skip in test mode for synthetic sequences)
-        if !test_mode {
-            if verbose {
-                println!("Verifying paths before compaction...");
-            }
-            if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
-                eprintln!("Path verification failed before compaction:");
-                for error in &errors {
-                    eprintln!("  - {}", error);
-                }
-                return Err(format!("Path verification failed before compaction: {} errors", errors.len()).into());
-            }
-        }
-        
-        // Perform node compaction unless disabled
-        if !args.no_compact {
-            let compacted = graph.compact_nodes();
-            if verbose {
-                println!("Compacted {} nodes", compacted);
-                println!("After compaction: {} nodes, {} edges", graph.nodes.len(), graph.edges.len());
-            }
-            
-            // Verify paths after compaction (skip in test mode for synthetic sequences)
-            if !test_mode {
-                if verbose {
-                    println!("Verifying paths after compaction...");
-                }
-                if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
-                    eprintln!("Path verification failed after compaction:");
-                    for error in &errors {
-                        eprintln!("  - {}", error);
-                    }
-                    return Err(format!("Path verification failed after compaction: {} errors", errors.len()).into());
-                }
-            }
-        } else if verbose {
-            println!("Skipping node compaction to preserve graph structure");
-        }
-        
-        
-        // Perform topological sort
-        graph.topological_sort();
-        if verbose {
-            println!("Completed topological sort");
-        }
-        
-        // Final verification after topological sort (skip in test mode for synthetic sequences)
-        if !test_mode {
-            if verbose {
-                println!("Final verification after topological sort...");
-            }
-            if let Err(errors) = graph.comprehensive_verify(Some(&original_sequences), verbose) {
-                eprintln!("Path verification failed after topological sort:");
-                for error in &errors {
-                    eprintln!("  - {}", error);
-                }
-                // Don't fail on verification errors - just warn
-                eprintln!("WARNING: Continuing despite {} verification errors", errors.len());
-            }
-        } else if verbose {
-            println!("Skipping verification in test mode");
-        }
-        
-        // Always validate GFA format before final output
-        if let Err(errors) = graph.validate_gfa_format(verbose) {
-            eprintln!("\nERROR: Invalid GFA format detected:");
-            for error in &errors {
-                eprintln!("  - {}", error);
-            }
-            return Err("Cannot write invalid GFA file".into());
-        }
-        
-        // Write the graph to GFA
-        self.write_graph_to_gfa(&graph, output_path, verbose)?;
         
         Ok(())
     }

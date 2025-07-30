@@ -79,7 +79,9 @@ fn test_base_case_empty() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -122,7 +124,9 @@ fn test_base_case_single_base() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -215,7 +219,9 @@ fn test_identical_sequences_share_nodes() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -265,9 +271,11 @@ fn test_inductive_sequence_extension() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
-        
-        run_seqrush_bidirected_simple(args).unwrap();
+            paf: None,
+            seqwish_style: false,
+    };
+    
+    run_seqrush_bidirected_simple(args).unwrap();
         
         let gfa_content = fs::read_to_string(output.path()).unwrap();
         let (nodes, _edges, paths) = parse_gfa_to_graph(&gfa_content);
@@ -354,7 +362,9 @@ fn test_path_reconstruction_correctness() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -407,7 +417,9 @@ fn test_edge_connectivity() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -453,7 +465,9 @@ fn test_palindromic_sequences() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -491,7 +505,9 @@ fn test_union_find_with_matches() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -539,7 +555,9 @@ fn test_large_sequences() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -582,7 +600,9 @@ fn test_transitivity_of_matches() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     

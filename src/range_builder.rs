@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::{Handle, BiNode, BiPath};
-use crate::graph_ops::Node;
 
 /// Represents an alignment range between sequences
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

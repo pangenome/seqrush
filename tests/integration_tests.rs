@@ -49,6 +49,8 @@ fn test_performance_scaling() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
+            paf: None,
+            seqwish_style: false,
         };
         
         let start = Instant::now();
@@ -126,7 +128,9 @@ fn test_real_world_example() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush(args).unwrap();
     
@@ -162,7 +166,9 @@ fn test_command_line_interface() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush(args).unwrap();
     
@@ -210,9 +216,11 @@ fn test_parallel_consistency() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
-        
-        run_seqrush(args).unwrap();
+            paf: None,
+            seqwish_style: false,
+    };
+    
+    run_seqrush(args).unwrap();
         
         let content = std::fs::read_to_string(output.path()).unwrap();
         let node_count = content.lines().filter(|l| l.starts_with("S\t")).count();

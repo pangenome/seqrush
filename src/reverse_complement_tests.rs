@@ -59,6 +59,8 @@ mod reverse_complement_tests {
             sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
+            paf: None,
+            seqwish_style: false,
         };
         
         // Build the graph
@@ -109,6 +111,8 @@ mod reverse_complement_tests {
             sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
+            paf: None,
+            seqwish_style: false,
         };
         
         run_seqrush(args).unwrap();
@@ -166,6 +170,8 @@ mod reverse_complement_tests {
             sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
+            paf: None,
+            seqwish_style: false,
         };
         
         run_seqrush(args).unwrap();
@@ -270,6 +276,8 @@ mod reverse_complement_tests {
             sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
+            paf: None,
+            seqwish_style: false,
         };
         
         run_seqrush(args).unwrap();

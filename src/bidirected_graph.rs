@@ -150,7 +150,7 @@ impl BiPath {
 }
 
 /// An edge in the bidirected graph
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BiEdge {
     pub from: Handle,
     pub to: Handle,

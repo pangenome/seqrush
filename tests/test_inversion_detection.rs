@@ -41,7 +41,9 @@ fn test_inversion_detection_simple() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     println!("Running inversion-aware alignment...");
     run_inversion_aware_seqrush(args).unwrap();
@@ -98,7 +100,9 @@ fn test_inversion_detection_with_context() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     println!("\nRunning inversion detection with context...");
     run_inversion_aware_seqrush(args).unwrap();
@@ -141,7 +145,9 @@ fn test_no_inversion() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -179,7 +185,9 @@ fn test_multiple_inversions() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     println!("\nRunning multiple inversion detection...");
     run_inversion_aware_seqrush(args).unwrap();

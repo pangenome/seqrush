@@ -95,7 +95,9 @@ fn test_inverted_repeats() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -141,7 +143,9 @@ fn test_complex_cnv_repeats() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -197,7 +201,9 @@ fn test_y_shaped_breakpoint() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -245,7 +251,9 @@ fn test_nested_inversions() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -299,7 +307,9 @@ fn test_random_rearrangements() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -347,7 +357,9 @@ fn test_tandem_repeat_polymorphism() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -402,7 +414,9 @@ fn test_complex_nested_variations() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -456,7 +470,9 @@ fn test_interspersed_repeats_with_inversions() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     
@@ -518,7 +534,9 @@ fn test_breakpoint_resolution() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_inversion_aware_seqrush(args).unwrap();
     

@@ -57,7 +57,9 @@ fn test_simple_forward_sequence() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -95,7 +97,9 @@ fn test_reverse_complement_alignment() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -136,7 +140,9 @@ fn test_palindromic_sequence() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -171,7 +177,9 @@ fn test_inversion_between_sequences() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -216,7 +224,9 @@ fn test_complex_rearrangement() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -249,7 +259,9 @@ fn test_self_alignment_with_repeats() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     
@@ -319,7 +331,9 @@ fn test_multiple_sequence_alignment() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush_bidirected_simple(args).unwrap();
     

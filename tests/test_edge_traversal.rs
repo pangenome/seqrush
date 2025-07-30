@@ -40,7 +40,9 @@ fn test_no_untraversed_edges_in_output() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush(args).unwrap();
     
@@ -108,6 +110,8 @@ fn test_self_loops_in_gfa() {
         sparsification: "1.0".to_string(),
         output_alignments: None,
         validate_paf: true,
+            paf: None,
+            seqwish_style: false,
     };
     
     run_seqrush(args).unwrap();
@@ -160,7 +164,9 @@ fn test_complex_graph_produces_valid_gfa() {
         sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
-        };
+            paf: None,
+            seqwish_style: false,
+    };
     
     run_seqrush(args).unwrap();
     
