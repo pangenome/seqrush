@@ -205,6 +205,13 @@ pub struct SeqRush {
 
 impl SeqRush {
     pub fn new(sequences: Vec<Sequence>, sparsity_threshold: u64) -> Self {
+        // Validate that no sequences are empty
+        for seq in &sequences {
+            if seq.data.is_empty() {
+                panic!("Empty sequences are not allowed: sequence '{}' has length 0", seq.id);
+            }
+        }
+        
         let total_length = sequences.iter().map(|s| s.data.len()).sum();
         let union_find = BidirectedUnionFind::new(total_length);
         

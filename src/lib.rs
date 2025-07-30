@@ -165,7 +165,7 @@ mod tests {
             max_divergence: None,
             verbose: false,
             test_mode: true,
-            no_compact: false, // Enable compaction for tests
+            no_compact: true, // Disable compaction to use single-base nodes
             sparsification: "1.0".to_string(),
             output_alignments: None,
             validate_paf: true,
@@ -275,12 +275,18 @@ mod tests {
         let (_nodes, paths) = run_test_with_sequences(sequences, 1);
         
         assert_eq!(paths.len(), 4);
-        // At least seq1 (base) should be different from the others
-        // The exact path lengths may vary due to graph compaction and alignment
-        assert_ne!(paths[0].1.len(), paths[1].1.len());
-        // seq2 and seq3 might have the same path length due to graph structure
-        // but they should still be different from seq1
-        assert_ne!(paths[0].1.len(), paths[2].1.len());
+        
+        // With single-base nodes:
+        // seq1: 100 nodes
+        // seq2: 110 nodes (100 + 10 from duplication)
+        // seq3: 120 nodes (100 + 20 from double duplication)
+        // seq4: 115 nodes (100 + 15 from triple duplication of 5bp)
+        
+        // Check that duplicated sequences have more nodes
+        assert_eq!(paths[0].1.len(), 100, "Base sequence should have 100 nodes");
+        assert_eq!(paths[1].1.len(), 110, "Single duplication should have 110 nodes");
+        assert_eq!(paths[2].1.len(), 120, "Double duplication should have 120 nodes");
+        assert_eq!(paths[3].1.len(), 115, "Triple duplication should have 115 nodes");
     }
 
     #[test]
@@ -434,20 +440,43 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_and_single_base_sequences() {
+    #[should_panic(expected = "Empty sequences are not allowed")]
+    fn test_empty_sequences_trigger_error() {
         let sequences = vec![
             ("empty1", "".to_string()),
             ("single", "A".to_string()),
-            ("empty2", "".to_string()),
+        ];
+        
+        // This should panic with empty sequence error
+        let _ = run_test_with_sequences(sequences, 1);
+    }
+
+    #[test]
+    fn test_single_and_double_base_sequences() {
+        let sequences = vec![
+            ("single", "A".to_string()),
             ("double", "AT".to_string()),
         ];
         
         let (nodes, paths) = run_test_with_sequences(sequences, 1);
         
-        // Should have nodes for non-empty sequences
-        assert!(nodes.len() >= 2); // At least A and T
-        // Paths only exist for non-empty sequences
-        assert!(paths.len() >= 2);
+        // With single-base nodes and no compaction:
+        // - "A" from both sequences shares the same node
+        // - "T" from "AT" gets its own node
+        // Total: 2 nodes (A is shared)
+        assert_eq!(nodes.len(), 2, "Should have 2 single-base nodes (A is shared)");
+        
+        // Both sequences have paths
+        assert_eq!(paths.len(), 2, "Both sequences should have paths");
+        
+        // Verify the paths exist
+        let single_path = paths.iter().find(|(name, _)| name == "single").expect("single path");
+        let double_path = paths.iter().find(|(name, _)| name == "double").expect("double path");
+        
+        // Single sequence "A" should have 1 node in its path
+        assert_eq!(single_path.1.len(), 1);
+        // Double sequence "AT" should have 2 nodes in its path
+        assert_eq!(double_path.1.len(), 2);
     }
 
     #[test]
@@ -490,19 +519,21 @@ mod tests {
         
         let (nodes, paths) = run_test_with_sequences(sequences, 1);
         
-        assert_eq!(paths.len(), 5);
-        // With current implementation, identical sequences get separate nodes
-        // TODO: Fix graph construction to properly merge identical sequences
-        // for i in 1..5 {
-        //     assert_eq!(paths[0].1, paths[i].1);
-        // }
+        assert_eq!(paths.len(), 5, "Should have 5 paths");
         
-        // With perfect alignments from allwave, identical sequences merge into one node
-        assert_eq!(nodes.len(), 1, "Identical sequences should merge into a single node");
+        // With single-base nodes, identical sequences will share the same nodes
+        // We should have exactly 150 nodes (one per base)
+        assert_eq!(nodes.len(), 150, "Should have one node per base position");
         
-        // Verify all paths traverse the same node
+        // All paths should have the same structure since sequences are identical
+        let path_lengths: Vec<_> = paths.iter().map(|(_, p)| p.len()).collect();
+        assert!(path_lengths.iter().all(|&len| len == 150), 
+                "All paths should have 150 nodes");
+        
+        // All paths should traverse the same nodes in the same order
         for i in 1..5 {
-            assert_eq!(paths[0].1, paths[i].1, "All identical sequences should follow the same path");
+            assert_eq!(paths[0].1, paths[i].1, 
+                      "Identical sequences should follow the same path");
         }
     }
 
