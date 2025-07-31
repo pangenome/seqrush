@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use crate::bidirected_graph::{Handle, reverse_complement};
 
 /// A path identifier
@@ -400,6 +401,87 @@ impl EmbeddedGraph {
         }
         
         Ok(total_merged)
+    }
+    
+    /// Write the graph to GFA format
+    pub fn write_gfa(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
+        // Write header
+        writeln!(writer, "H\tVN:Z:1.0")?;
+        
+        // Write nodes (segments)
+        for (node_id, node) in &self.nodes {
+            writeln!(writer, "S\t{}\t{}", node_id, String::from_utf8_lossy(&node.sequence))?;
+        }
+        
+        // Write edges (links) by traversing paths
+        let mut written_edges = HashSet::new();
+        
+        for (_path_id, steps_by_path) in self.nodes.values()
+            .flat_map(|n| &n.path_steps)
+            .flat_map(|(pid, steps)| steps.iter().map(move |s| (pid, s))) {
+            
+            if let Some((next_handle, _)) = steps_by_path.next {
+                let from = steps_by_path.handle;
+                let to = next_handle;
+                
+                // Create edge key to avoid duplicates
+                let edge_key = (from.node_id(), from.is_reverse(), to.node_id(), to.is_reverse());
+                
+                if !written_edges.contains(&edge_key) {
+                    written_edges.insert(edge_key);
+                    
+                    let from_orient = if from.is_reverse() { '-' } else { '+' };
+                    let to_orient = if to.is_reverse() { '-' } else { '+' };
+                    
+                    writeln!(writer, "L\t{}\t{}\t{}\t{}\t0M", 
+                            from.node_id(), from_orient, to.node_id(), to_orient)?;
+                }
+            }
+        }
+        
+        // Write paths
+        for (path_id, path_meta) in &self.paths {
+            if let Some(start_handle) = path_meta.start {
+                let mut path_string = String::new();
+                let mut current = Some((start_handle, 0usize));
+                let mut visited = HashSet::new();
+                
+                while let Some((handle, occurrence)) = current {
+                    // Prevent infinite loops
+                    let visit_key = (handle, occurrence);
+                    if visited.contains(&visit_key) {
+                        break;  // Circular path
+                    }
+                    visited.insert(visit_key);
+                    
+                    // Add to path string
+                    if !path_string.is_empty() {
+                        path_string.push(',');
+                    }
+                    path_string.push_str(&format!("{}{}", 
+                        handle.node_id(),
+                        if handle.is_reverse() { '-' } else { '+' }
+                    ));
+                    
+                    // Get next handle
+                    let mut found_next = None;
+                    if let Some(node) = self.nodes.get(&handle.node_id()) {
+                        if let Some(steps) = node.path_steps.get(path_id) {
+                            if let Some(step) = steps.iter()
+                                .filter(|s| s.handle == handle)
+                                .nth(occurrence) {
+                                found_next = step.next;
+                            }
+                        }
+                    }
+                    current = found_next;
+                }
+                
+                writeln!(writer, "P\t{}\t{}\t*", path_meta.name, path_string)?;
+            }
+        }
+        
+        Ok(())
     }
     
     /// Get the sequence for a path

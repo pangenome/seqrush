@@ -9,6 +9,8 @@ use crate::graph_ops::{Graph, Node, Edge};
 use crate::bidirected_union_find::BidirectedUnionFind;
 use crate::pos::{Pos, make_pos};
 use crate::bidirected_ops::BidirectedGraph;
+use crate::embedded_graph::EmbeddedGraph;
+use crate::embedded_builder::convert_to_embedded;
 use allwave::{AllPairIterator, AlignmentParams, SparsificationStrategy};
 use sha2::{Sha256, Digest};
 
@@ -58,6 +60,10 @@ pub struct Args {
     /// Disable node compaction (compaction merges linear chains of nodes)
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
+    
+    /// Use embedded graph for compaction (experimental)
+    #[arg(long = "use-embedded", default_value = "false")]
+    pub use_embedded: bool,
     
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
     #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
@@ -754,8 +760,47 @@ impl SeqRush {
         let mut bi_graph = self.build_bidirected_graph(verbose)?;
         
         // Compute path hashes before compaction
-        let path_hashes_before = self.compute_path_hashes(&bi_graph);
-        let graph_size_before = self.compute_graph_size(&bi_graph);
+        let _path_hashes_before = self.compute_path_hashes(&bi_graph);
+        let _graph_size_before = self.compute_graph_size(&bi_graph);
+        
+        // Use embedded graph if requested
+        if args.use_embedded {
+            if verbose {
+                println!("Converting to embedded graph for compaction...");
+            }
+            
+            // Convert to embedded graph
+            let mut embedded = convert_to_embedded(&bi_graph)?;
+            
+            if !args.no_compact {
+                if verbose {
+                    println!("Applying embedded graph compaction...");
+                }
+                let nodes_before = embedded.nodes.len();
+                match embedded.compact() {
+                    Ok(merged) => {
+                        let nodes_after = embedded.nodes.len();
+                        if verbose {
+                            println!("Compacted {} nodes into {} nodes ({} pairs merged)", 
+                                    nodes_before, nodes_after, merged);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("WARNING: Embedded compaction failed: {}", e);
+                    }
+                }
+            }
+            
+            // Write embedded graph
+            let file = File::create(output_path)?;
+            let mut writer = BufWriter::new(file);
+            embedded.write_gfa(&mut writer)?;
+            
+            println!("Embedded graph written to {}: {} nodes, {} paths", 
+                     output_path, embedded.nodes.len(), embedded.paths.len());
+            
+            return Ok(());
+        }
         
         // Apply compaction unless disabled
         // Apply compaction if enabled
