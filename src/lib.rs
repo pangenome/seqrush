@@ -15,6 +15,7 @@ pub mod bidirected_builder;
 pub mod range_builder;
 pub mod seqwish_style;
 pub mod bidirected_compaction;
+pub mod embedded_graph;
 
 #[cfg(test)]
 mod compaction_tests;
