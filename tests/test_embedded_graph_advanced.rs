@@ -132,8 +132,8 @@ fn test_multiple_paths_same_nodes() {
     // Nodes should track both paths
     let node_a = &graph.nodes[&a];
     assert_eq!(node_a.path_steps.len(), 2);
-    assert!(node_a.path_steps.contains_key(&path1));
-    assert!(node_a.path_steps.contains_key(&path2));
+    assert!(node_a.path_steps.contains_key(&(path1, false)));
+    assert!(node_a.path_steps.contains_key(&(path2, false)));
     
     // Still perfect neighbors (all paths agree)
     assert!(graph.are_perfect_neighbors(Handle::forward(a), Handle::forward(b)));
