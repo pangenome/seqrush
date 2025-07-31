@@ -103,13 +103,27 @@ Added comprehensive validation to catch coordinate mismatches:
 - Provides detailed error messages when mismatches occur
 - Helped identify the PAF strand interpretation issue
 
+## Compaction Algorithm (NEW)
+
+The compaction algorithm has been redesigned based on a key mathematical insight: **path traversals ARE the links**. The algorithm is documented in detail in `docs/compaction_algorithm.md`.
+
+Key points:
+1. Build connection maps directly from path traversals (not edges)
+2. Two nodes are perfect neighbors if:
+   - Node A only connects to node B (outbound[A] == {B})
+   - Node B only receives from node A (inbound[B] == {A})
+3. If any difference exists in connection patterns, nodes cannot be merged
+
+Implementation status:
+- ✅ Algorithm documented in `docs/compaction_algorithm.md`
+- ✅ Compaction code updated to use path-based connections
+- ✅ Workaround script `visualize_hla.sh` uses odgi for compaction
+
 ## Next Steps
 
-1. Run the test suite to identify specific failures
-2. Fix union-find implementation based on test results
-3. Add more detailed logging to trace union operations
-4. Compare intermediate results with seqwish at each stage
-5. Iterate until all tests pass and node counts match seqwish
+1. Test the new path-based compaction algorithm
+2. Debug any remaining issues with reverse-oriented node handling
+3. Validate that compacted graphs match seqwish output
 
 ## Command Reference
 

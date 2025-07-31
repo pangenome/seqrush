@@ -438,18 +438,18 @@ impl BidirectedGraph {
         }
         
         // Write links (edges) with orientations
-        let mut written_edges = HashSet::new();
+        // NOTE: We do NOT canonicalize edges when writing!
+        // If we have edge A+ -> B+, its reverse complement is B- -> A-
+        // If we canonicalize 3+ -> 2+ to 2- -> 3-, and we already have 2+ -> 3+,
+        // the output will incorrectly show both 2+ -> 3+ and 2- -> 3-, which
+        // violates the bidirected graph property.
         for edge in &self.edges {
-            // Get canonical form to avoid duplicates
-            let canonical = edge.canonical();
-            if written_edges.insert(canonical) {
-                writeln!(writer, "L\t{}\t{}\t{}\t{}\t0M",
-                    canonical.from.node_id(),
-                    canonical.from.orientation_char(),
-                    canonical.to.node_id(),
-                    canonical.to.orientation_char()
-                )?;
-            }
+            writeln!(writer, "L\t{}\t{}\t{}\t{}\t0M",
+                edge.from.node_id(),
+                edge.from.orientation_char(),
+                edge.to.node_id(),
+                edge.to.orientation_char()
+            )?;
         }
         
         // Write paths with orientations

@@ -14,6 +14,7 @@ pub mod seqrush_clean;
 pub mod bidirected_builder;
 pub mod range_builder;
 pub mod seqwish_style;
+pub mod bidirected_compaction;
 
 #[cfg(test)]
 mod compaction_tests;

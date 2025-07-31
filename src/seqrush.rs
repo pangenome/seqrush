@@ -56,7 +56,7 @@ pub struct Args {
     pub test_mode: bool,
     
     /// Disable node compaction (compaction merges linear chains of nodes)
-    #[arg(long = "no-compact", default_value = "true")]
+    #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
     
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
@@ -201,6 +201,9 @@ pub struct SeqRush {
     pub total_length: usize,
     pub union_find: BidirectedUnionFind,
     pub sparsity_threshold: u64,
+    /// Maps each position to its orientation relative to its union representative
+    /// true = reverse orientation relative to representative
+    pub orientation_map: HashMap<Pos, bool>,
 }
 
 impl SeqRush {
@@ -215,22 +218,15 @@ impl SeqRush {
         let total_length = sequences.iter().map(|s| s.data.len()).sum();
         let union_find = BidirectedUnionFind::new(total_length);
         
-        // CRITICAL: Unite forward and reverse orientations of each position
-        // This ensures we work with a single "strand" where alignments can happen in both orientations
-        for seq in &sequences {
-            for i in 0..seq.data.len() {
-                let global_pos = seq.offset + i;
-                let pos_fwd = make_pos(global_pos, false);
-                let pos_rev = make_pos(global_pos, true);
-                union_find.unite(pos_fwd, pos_rev);
-            }
-        }
+        // NOTE: We do NOT unite forward and reverse orientations of each position initially
+        // This allows the alignment process to determine which orientations should be united
         
         Self {
             sequences,
             total_length,
             union_find,
             sparsity_threshold,
+            orientation_map: HashMap::new(),
         }
     }
     
@@ -762,9 +758,60 @@ impl SeqRush {
         let graph_size_before = self.compute_graph_size(&bi_graph);
         
         // Apply compaction unless disabled
-        // COMPACTION DISABLED - Using single-base nodes for mathematical correctness
-        /*
+        // Apply compaction if enabled
         if !args.no_compact {
+            if verbose {
+                println!("Applying perfect neighbor compaction...");
+            }
+            let nodes_before = bi_graph.nodes.len();
+            
+            // Store original sequences before compaction for validation
+            let original_sequences: HashMap<String, Vec<u8>> = bi_graph.paths.iter()
+                .map(|path| {
+                    let seq = path.get_sequence(|id| bi_graph.nodes.get(&id));
+                    (path.name.clone(), seq)
+                })
+                .collect();
+            
+            match bi_graph.compact_perfect_neighbors() {
+                Ok(nodes_compacted) => {
+                    let nodes_after = bi_graph.nodes.len();
+                    if verbose {
+                        println!("Compacted {} nodes into {} nodes ({} nodes removed)", 
+                                nodes_before, nodes_after, nodes_compacted);
+                    }
+                    
+                    // Validate that sequences are preserved
+                    for path in &bi_graph.paths {
+                        let current_seq = path.get_sequence(|id| bi_graph.nodes.get(&id));
+                        if let Some(original_seq) = original_sequences.get(&path.name) {
+                            if current_seq.len() != original_seq.len() {
+                                eprintln!("ERROR: Path '{}' length changed! Original: {}, Current: {}", 
+                                    path.name, original_seq.len(), current_seq.len());
+                                // Debug: show the first few nodes in the path
+                                eprintln!("  Path has {} steps", path.steps.len());
+                                for (i, &handle) in path.steps.iter().enumerate().take(5) {
+                                    if let Some(node) = bi_graph.nodes.get(&handle.node_id()) {
+                                        eprintln!("    Step {}: node {} ({} bp, {})", 
+                                            i, handle.node_id(), node.sequence.len(),
+                                            if handle.is_reverse() { "rev" } else { "fwd" });
+                                    }
+                                }
+                                return Err(format!("Path validation failed after compaction").into());
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    eprintln!("ERROR during compaction: {}", e);
+                    return Err(format!("Compaction failed: {}", e).into());
+                }
+            }
+        }
+        
+        // LEGACY COMPACTION CODE - DISABLED
+        /*
+        if false {
             if verbose {
                 println!("Applying graph compaction...");
             }
