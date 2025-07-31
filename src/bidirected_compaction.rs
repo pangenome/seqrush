@@ -9,27 +9,41 @@ impl BidirectedGraph {
         // Step 1: Validate paths before compaction
         let original_path_sequences = self.validate_and_save_paths()?;
         
-        // Step 2: Find perfect neighbor pairs
-        let perfect_pairs = self.find_perfect_neighbor_pairs();
+        let mut total_compacted = 0;
+        let mut iteration = 0;
         
-        if perfect_pairs.is_empty() {
-            return Ok(0);
+        // Iteratively compact perfect neighbor pairs
+        loop {
+            iteration += 1;
+            eprintln!("Compaction iteration {}", iteration);
+            
+            // Find perfect neighbor pairs
+            let perfect_pairs = self.find_perfect_neighbor_pairs();
+            
+            if perfect_pairs.is_empty() {
+                eprintln!("No more perfect pairs found, stopping compaction");
+                break;
+            }
+            
+            eprintln!("Found {} perfect neighbor pairs", perfect_pairs.len());
+            
+            // Apply compaction for these pairs only (no transitive grouping)
+            let nodes_compacted = self.apply_direct_compaction(&perfect_pairs)?;
+            total_compacted += nodes_compacted;
+            
+            eprintln!("Compacted {} nodes in this iteration", nodes_compacted);
+            
+            // If we found pairs but didn't compact any, we're stuck
+            if !perfect_pairs.is_empty() && nodes_compacted == 0 {
+                eprintln!("ERROR: Found pairs but made no progress, stopping to prevent infinite loop");
+                break;
+            }
         }
         
-        // Step 3: Use union-find to group compactable nodes
-        let compaction_groups = self.build_compaction_groups(&perfect_pairs);
-        
-        
-        // Step 4: Order nodes within each group using path information
-        let ordered_groups = self.order_compaction_groups(&compaction_groups)?;
-        
-        // Step 5: Create compacted nodes and update graph
-        let nodes_compacted = self.apply_compaction(&ordered_groups)?;
-        
-        // Step 6: Validate paths after compaction
+        // Validate paths after compaction
         self.validate_paths_match(&original_path_sequences)?;
         
-        Ok(nodes_compacted)
+        Ok(total_compacted)
     }
     
     /// Save current path sequences for validation
@@ -83,7 +97,9 @@ impl BidirectedGraph {
                     
                     // B has only one inbound connection, and it's from A
                     if next_incoming.len() == 1 && next_incoming[0] == handle {
-                        // These are perfect neighbors!
+                        // That's it! A→B is a perfect pair
+                        // If A only goes to B and B only comes from A,
+                        // they MUST be adjacent in all paths
                         perfect_pairs.push((handle, next_handle));
                     }
                 }
@@ -218,6 +234,152 @@ impl BidirectedGraph {
         // For now, just use the order from the group
         // In a more sophisticated implementation, we'd analyze the graph structure
         Ok(group.to_vec())
+    }
+    
+    /// Apply direct compaction for perfect neighbor pairs without transitive grouping
+    fn apply_direct_compaction(&mut self, perfect_pairs: &[(Handle, Handle)]) -> Result<usize, String> {
+        let mut nodes_compacted = 0;
+        let mut handle_remapping: HashMap<Handle, Handle> = HashMap::new();
+        let mut new_node_id = self.nodes.keys().max().copied().unwrap_or(0) + 1;
+        let mut actually_merged_pairs: Vec<(Handle, Handle)> = Vec::new();
+        
+        // First, let's see what pairs we're trying to compact
+        if perfect_pairs.len() < 10 {
+            eprintln!("Perfect pairs to compact:");
+            for &(from, to) in perfect_pairs {
+                eprintln!("  {:?} -> {:?}", from, to);
+            }
+        }
+        
+        // Process each pair individually
+        for &(from, to) in perfect_pairs {
+            // Skip if either handle was already remapped
+            if handle_remapping.contains_key(&from) || handle_remapping.contains_key(&to) {
+                if perfect_pairs.len() < 10 {
+                    eprintln!("  Skipping {:?} -> {:?} (already remapped)", from, to);
+                }
+                continue;
+            }
+            
+            // Get the nodes
+            let from_node = match self.nodes.get(&from.node_id()) {
+                Some(node) => node,
+                None => {
+                    if perfect_pairs.len() < 10 {
+                        eprintln!("  Skipping {:?} -> {:?} (from node {} doesn't exist)", from, to, from.node_id());
+                    }
+                    continue; // Node was already removed
+                }
+            };
+            let to_node = match self.nodes.get(&to.node_id()) {
+                Some(node) => node,
+                None => {
+                    if perfect_pairs.len() < 10 {
+                        eprintln!("  Skipping {:?} -> {:?} (to node {} doesn't exist)", from, to, to.node_id());
+                    }
+                    continue; // Node was already removed
+                }
+            };
+            
+            // Create merged sequence
+            let mut merged_sequence = Vec::new();
+            
+            // Add sequence from 'from' handle
+            if from.is_reverse() {
+                merged_sequence.extend_from_slice(&crate::bidirected_graph::reverse_complement(&from_node.sequence));
+            } else {
+                merged_sequence.extend_from_slice(&from_node.sequence);
+            }
+            
+            // Add sequence from 'to' handle
+            if to.is_reverse() {
+                merged_sequence.extend_from_slice(&crate::bidirected_graph::reverse_complement(&to_node.sequence));
+            } else {
+                merged_sequence.extend_from_slice(&to_node.sequence);
+            }
+            
+            // Create new node
+            let new_handle = Handle::forward(new_node_id);
+            self.nodes.insert(new_node_id, BiNode {
+                id: new_node_id,
+                sequence: merged_sequence,
+                rank: None,
+            });
+            
+            // Map the handles used in this merge
+            handle_remapping.insert(from, new_handle);
+            handle_remapping.insert(to, new_handle);
+            
+            // Also map their complements appropriately
+            // The complement of 'from' maps to the complement of the new handle
+            handle_remapping.insert(from.flip(), new_handle.flip());
+            // The complement of 'to' maps to the complement of the new handle
+            handle_remapping.insert(to.flip(), new_handle.flip());
+            
+            new_node_id += 1;
+            nodes_compacted += 2; // We merged 2 nodes
+        }
+        
+        // Remove old nodes
+        let nodes_to_remove: HashSet<_> = handle_remapping.keys()
+            .map(|h| h.node_id())
+            .collect();
+        
+        for node_id in nodes_to_remove {
+            self.nodes.remove(&node_id);
+        }
+        
+        // Update edges
+        let mut new_edges = HashSet::new();
+        for edge in &self.edges {
+            let from = handle_remapping.get(&edge.from).copied().unwrap_or(edge.from);
+            let to = handle_remapping.get(&edge.to).copied().unwrap_or(edge.to);
+            
+            // Don't add self-loops from compaction
+            if from != to {
+                new_edges.insert(BiEdge { from, to });
+            }
+        }
+        self.edges = new_edges;
+        
+        // Store which pairs were actually merged
+        let merged_pairs: HashSet<(Handle, Handle)> = perfect_pairs.iter()
+            .filter(|(from, to)| {
+                handle_remapping.contains_key(from) && handle_remapping.contains_key(to)
+            })
+            .cloned()
+            .collect();
+        
+        // Update paths - only replace exact A→B sequences with C
+        for path in &mut self.paths {
+            let mut new_steps = Vec::new();
+            let mut i = 0;
+            
+            while i < path.steps.len() {
+                if i + 1 < path.steps.len() {
+                    let current = path.steps[i];
+                    let next = path.steps[i + 1];
+                    
+                    // Check if this is a merged pair
+                    if merged_pairs.contains(&(current, next)) {
+                        // This is a perfect pair that was merged
+                        if let Some(&new_handle) = handle_remapping.get(&current) {
+                            new_steps.push(new_handle);
+                            i += 2; // Skip both handles
+                            continue;
+                        }
+                    }
+                }
+                
+                // Not part of a merged pair, keep the original handle
+                new_steps.push(path.steps[i]);
+                i += 1;
+            }
+            
+            path.steps = new_steps;
+        }
+        
+        Ok(nodes_compacted)
     }
     
     /// Apply compaction by creating new merged nodes and updating the graph
