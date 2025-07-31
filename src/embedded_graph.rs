@@ -5,13 +5,21 @@ use crate::bidirected_graph::{Handle, reverse_complement};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PathId(pub usize);
 
+/// A unique step identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StepId {
+    pub path_id: PathId,
+    pub node_id: usize,
+    pub occurrence: usize,  // Which occurrence of this path on this node (0-based)
+}
+
 /// A step in a path through the graph
 #[derive(Debug, Clone)]
 pub struct PathStep {
     pub path_id: PathId,
     pub handle: Handle,  // The handle used to visit this node
-    pub prev: Option<Handle>,
-    pub next: Option<Handle>,
+    pub prev: Option<(Handle, usize)>,  // (prev_handle, occurrence_on_that_node)
+    pub next: Option<(Handle, usize)>,  // (next_handle, occurrence_on_that_node)
 }
 
 /// A node in the embedded graph where paths are stored as linked lists
@@ -19,9 +27,9 @@ pub struct PathStep {
 pub struct EmbeddedNode {
     pub id: usize,
     pub sequence: Vec<u8>,
-    /// For each (path, orientation) that visits this node, store the path step
-    /// Key is (PathId, is_reverse)
-    pub path_steps: HashMap<(PathId, bool), PathStep>,
+    /// For each path that visits this node, store ordered list of steps
+    /// A path can visit a node multiple times
+    pub path_steps: HashMap<PathId, Vec<PathStep>>,
 }
 
 impl EmbeddedNode {
@@ -102,32 +110,60 @@ impl EmbeddedGraph {
         let path_meta = self.paths.get_mut(&path_id)
             .ok_or_else(|| format!("Path {:?} not found", path_id))?;
         
-        // Get the node
-        let node = self.nodes.get_mut(&node_id)
-            .ok_or_else(|| format!("Node {} not found", node_id))?;
-        
-        // Determine the previous handle
-        let prev_handle = path_meta.end;
+        // Determine the previous handle and its occurrence
+        let prev_info = if let Some(prev_handle) = path_meta.end {
+            // Find the last occurrence of this path on the previous node
+            let prev_node = self.nodes.get(&prev_handle.node_id())
+                .ok_or_else(|| format!("Previous node {} not found", prev_handle.node_id()))?;
+            
+            if let Some(prev_steps) = prev_node.path_steps.get(&path_id) {
+                // Find the step with matching handle
+                let matching_steps: Vec<_> = prev_steps.iter().enumerate()
+                    .filter(|(_, s)| s.handle == prev_handle)
+                    .collect();
+                
+                if let Some((idx, _)) = matching_steps.last() {
+                    Some((prev_handle, *idx))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         
         // Create the path step
         let step = PathStep {
             path_id,
             handle,
-            prev: prev_handle,
+            prev: prev_info,
             next: None,
         };
         
-        // Insert the step into the node, keyed by (path_id, orientation)
-        node.path_steps.insert((path_id, handle.is_reverse()), step);
+        // Get the node and determine current occurrence
+        let node = self.nodes.get_mut(&node_id)
+            .ok_or_else(|| format!("Node {} not found", node_id))?;
+        
+        let steps = node.path_steps.entry(path_id).or_default();
+        let current_occurrence = steps.iter()
+            .filter(|s| s.handle == handle)
+            .count();
+        
+        steps.push(step);
         
         // Update the previous node's next pointer if it exists
-        if let Some(prev) = prev_handle {
-            let prev_node = self.nodes.get_mut(&prev.node_id())
-                .ok_or_else(|| format!("Previous node {} not found", prev.node_id()))?;
+        if let Some((prev_handle, prev_occurrence)) = prev_info {
+            let prev_node = self.nodes.get_mut(&prev_handle.node_id())
+                .ok_or_else(|| format!("Previous node {} not found", prev_handle.node_id()))?;
             
-            // The previous step was stored with its orientation
-            if let Some(prev_step) = prev_node.path_steps.get_mut(&(path_id, prev.is_reverse())) {
-                prev_step.next = Some(handle);
+            if let Some(prev_steps) = prev_node.path_steps.get_mut(&path_id) {
+                if let Some(prev_step) = prev_steps.iter_mut()
+                    .filter(|s| s.handle == prev_handle)
+                    .nth(prev_occurrence) {
+                    prev_step.next = Some((handle, current_occurrence));
+                }
             }
         }
         
@@ -145,12 +181,14 @@ impl EmbeddedGraph {
         let mut next_handles = HashSet::new();
         
         if let Some(node) = self.nodes.get(&handle.node_id()) {
-            // Look for steps that use this specific handle
-            for ((_, is_reverse), step) in &node.path_steps {
-                if *is_reverse == handle.is_reverse() {
-                    // This step uses the same orientation we're querying
-                    if let Some(next) = step.next {
-                        next_handles.insert(next);
+            // Look at all steps for all paths on this node
+            for (_path_id, steps) in &node.path_steps {
+                for step in steps {
+                    // Only consider steps that use the same orientation
+                    if step.handle == handle {
+                        if let Some((next_handle, _)) = step.next {
+                            next_handles.insert(next_handle);
+                        }
                     }
                 }
             }
@@ -164,12 +202,14 @@ impl EmbeddedGraph {
         let mut prev_handles = HashSet::new();
         
         if let Some(node) = self.nodes.get(&handle.node_id()) {
-            // Look for steps that use this specific handle
-            for ((_, is_reverse), step) in &node.path_steps {
-                if *is_reverse == handle.is_reverse() {
-                    // This step uses the same orientation we're querying
-                    if let Some(prev) = step.prev {
-                        prev_handles.insert(prev);
+            // Look at all steps for all paths on this node
+            for (_path_id, steps) in &node.path_steps {
+                for step in steps {
+                    // Only consider steps that use the same orientation
+                    if step.handle == handle {
+                        if let Some((prev_handle, _)) = step.prev {
+                            prev_handles.insert(prev_handle);
+                        }
                     }
                 }
             }
@@ -235,53 +275,71 @@ impl EmbeddedGraph {
         let new_handle = Handle::forward(new_id);
         
         // For each path that goes through from->to, update it to go through the new node
-        for ((path_id, from_is_rev), from_step) in &from_node.path_steps {
-            if from_step.next == Some(to) && *from_is_rev == from.is_reverse() {
-                // This path goes from->to, update it
-                let new_node = self.nodes.get_mut(&new_id).unwrap();
-                
-                // Get the step from 'to' node
-                let to_key = (*path_id, to.is_reverse());
-                let to_step = to_node.path_steps.get(&to_key)
-                    .ok_or_else(|| format!("Expected to find path {:?} in to_node", path_id))?;
-                
-                // Create new step in the merged node
-                let new_step = PathStep {
-                    path_id: *path_id,
-                    handle: new_handle,
-                    prev: from_step.prev,
-                    next: to_step.next,
-                };
-                
-                new_node.path_steps.insert((*path_id, false), new_step);
-                
-                // Update previous node's next pointer
-                if let Some(prev_handle) = from_step.prev {
-                    if let Some(prev_node) = self.nodes.get_mut(&prev_handle.node_id()) {
-                        let prev_key = (*path_id, prev_handle.is_reverse());
-                        if let Some(prev_step) = prev_node.path_steps.get_mut(&prev_key) {
-                            prev_step.next = Some(new_handle);
+        for (path_id, from_steps) in &from_node.path_steps {
+            // Find steps that use the correct orientation and go to 'to'
+            for (from_idx, from_step) in from_steps.iter().enumerate() {
+                if from_step.handle == from {
+                    if let Some((next_handle, next_occurrence)) = from_step.next {
+                        if next_handle == to {
+                            // This path goes from->to, update it
+                            let new_node = self.nodes.get_mut(&new_id).unwrap();
+                            
+                            // Find the matching step in 'to' node
+                            if let Some(to_steps) = to_node.path_steps.get(path_id) {
+                                if let Some(to_step) = to_steps.iter()
+                                    .filter(|s| s.handle == to)
+                                    .nth(next_occurrence) {
+                                    
+                                    // Create new step in the merged node
+                                    let new_step = PathStep {
+                                        path_id: *path_id,
+                                        handle: new_handle,
+                                        prev: from_step.prev,
+                                        next: to_step.next,
+                                    };
+                                    
+                                    let new_steps = new_node.path_steps.entry(*path_id).or_default();
+                                    let new_occurrence = new_steps.len();
+                                    new_steps.push(new_step);
+                                    
+                                    // Update previous node's next pointer
+                                    if let Some((prev_handle, prev_occurrence)) = from_step.prev {
+                                        if let Some(prev_node) = self.nodes.get_mut(&prev_handle.node_id()) {
+                                            if let Some(prev_steps) = prev_node.path_steps.get_mut(path_id) {
+                                                if let Some(prev_step) = prev_steps.iter_mut()
+                                                    .filter(|s| s.handle == prev_handle)
+                                                    .nth(prev_occurrence) {
+                                                    prev_step.next = Some((new_handle, new_occurrence));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Update next node's prev pointer
+                                    if let Some((next_handle, next_occurrence_on_next)) = to_step.next {
+                                        if let Some(next_node) = self.nodes.get_mut(&next_handle.node_id()) {
+                                            if let Some(next_steps) = next_node.path_steps.get_mut(path_id) {
+                                                if let Some(next_step) = next_steps.iter_mut()
+                                                    .filter(|s| s.handle == next_handle)
+                                                    .nth(next_occurrence_on_next) {
+                                                    next_step.prev = Some((new_handle, new_occurrence));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Update path metadata if needed
+                                    if let Some(path_meta) = self.paths.get_mut(path_id) {
+                                        if path_meta.start == Some(from) {
+                                            path_meta.start = Some(new_handle);
+                                        }
+                                        if path_meta.end == Some(to) {
+                                            path_meta.end = Some(new_handle);
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
-                
-                // Update next node's prev pointer
-                if let Some(next_handle) = to_step.next {
-                    if let Some(next_node) = self.nodes.get_mut(&next_handle.node_id()) {
-                        let next_key = (*path_id, next_handle.is_reverse());
-                        if let Some(next_step) = next_node.path_steps.get_mut(&next_key) {
-                            next_step.prev = Some(new_handle);
-                        }
-                    }
-                }
-                
-                // Update path metadata if needed
-                if let Some(path_meta) = self.paths.get_mut(path_id) {
-                    if path_meta.start == Some(from) {
-                        path_meta.start = Some(new_handle);
-                    }
-                    if path_meta.end == Some(to) {
-                        path_meta.end = Some(new_handle);
                     }
                 }
             }
@@ -350,23 +408,35 @@ impl EmbeddedGraph {
             .ok_or_else(|| format!("Path {:?} not found", path_id))?;
         
         let mut sequence = Vec::new();
-        let mut current = path_meta.start;
         
-        while let Some(handle) = current {
-            let node = self.nodes.get(&handle.node_id())
-                .ok_or_else(|| format!("Node {} not found", handle.node_id()))?;
+        if let Some(start_handle) = path_meta.start {
+            let mut current = Some((start_handle, 0usize));
+            let mut visited = HashSet::new();
             
-            sequence.extend_from_slice(&node.get_sequence(handle.is_reverse()));
-            
-            // Get next handle - need to find the step for this path
-            let mut found_next = None;
-            for ((pid, is_rev), step) in &node.path_steps {
-                if *pid == path_id && *is_rev == handle.is_reverse() {
-                    found_next = step.next;
-                    break;
+            while let Some((handle, occurrence)) = current {
+                // Prevent infinite loops
+                let visit_key = (handle, occurrence);
+                if visited.contains(&visit_key) {
+                    return Err(format!("Cycle detected in path {:?} at {:?}", path_id, visit_key));
                 }
+                visited.insert(visit_key);
+                
+                let node = self.nodes.get(&handle.node_id())
+                    .ok_or_else(|| format!("Node {} not found", handle.node_id()))?;
+                
+                sequence.extend_from_slice(&node.get_sequence(handle.is_reverse()));
+                
+                // Get next handle - find the specific occurrence
+                let mut found_next = None;
+                if let Some(steps) = node.path_steps.get(&path_id) {
+                    if let Some(step) = steps.iter()
+                        .filter(|s| s.handle == handle)
+                        .nth(occurrence) {
+                        found_next = step.next;
+                    }
+                }
+                current = found_next;
             }
-            current = found_next;
         }
         
         Ok(sequence)

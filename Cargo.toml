@@ -17,6 +17,18 @@ path = "src/lib.rs"
 name = "seqrush"
 path = "src/main.rs"
 
+[[bin]]
+name = "test_embedded_circular"
+path = "src/bin/test_embedded_circular.rs"
+
+[[bin]]
+name = "debug_embedded_path"
+path = "src/bin/debug_embedded_path.rs"
+
+[[bin]]
+name = "test_embedded_conversion"
+path = "src/bin/test_embedded_conversion.rs"
+
 [dependencies]
 lib_wfa2 = { git = "https://github.com/ekg/lib_wfa2", rev = "819b82cd842aabedcb962fd5b82380fe454234f6" }
 allwave = { git = "https://github.com/pangenome/allwave", rev = "788acb0cfbacc00dd4d86663bfe87ba5d39d02c0" }
