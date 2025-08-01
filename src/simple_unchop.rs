@@ -181,9 +181,19 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
     
     // Create edges
     let mut created_edges = HashSet::new();
+    let mut debug_edge_count = 0;
     for edge in graph.edges() {
         let old_from = edge.0.id();
         let old_to = edge.1.id();
+        
+        if !node_mapping.contains_key(&old_from) || !node_mapping.contains_key(&old_to) {
+            if verbose && debug_edge_count < 5 {
+                eprintln!("[unchop] WARNING: Edge {:?} -> {:?} has unmapped nodes", old_from, old_to);
+                debug_edge_count += 1;
+            }
+            continue;
+        }
+        
         let new_from = node_mapping[&old_from];
         let new_to = node_mapping[&old_to];
         
@@ -200,6 +210,12 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
         let key = (new_edge.0.as_integer(), new_edge.1.as_integer());
         if created_edges.insert(key) {
             new_graph.create_edge(new_edge);
+            
+            if verbose && debug_edge_count < 5 {
+                eprintln!("[unchop] Edge {:?} -> {:?} mapped to {:?} -> {:?}", 
+                         old_from, old_to, new_from, new_to);
+                debug_edge_count += 1;
+            }
         }
     }
     
