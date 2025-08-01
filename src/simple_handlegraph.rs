@@ -32,13 +32,24 @@ impl SeqRush {
             }
         }
         
+        let mut debug_count = 0;
         for &union_rep in &unique_unions {
             let base = self.get_base_for_union(union_rep);
             let node_id = NodeId::from(next_node_id);
+            
+            if verbose && debug_count < 5 {
+                println!("  Creating node {} for union_rep {}", next_node_id, union_rep);
+                debug_count += 1;
+            }
+            
             next_node_id += 1;
             
             graph.create_handle(&[base], node_id);
             union_to_node.insert(union_rep, node_id);
+        }
+        
+        if verbose {
+            println!("Created {} nodes with IDs 1..{}", unique_unions.len(), next_node_id);
         }
         
         // Build paths
@@ -55,15 +66,25 @@ impl SeqRush {
                 
                 // Find the actual union rep
                 let mut union_rep = union_fwd;
+                let mut found = false;
                 for &existing in union_to_node.keys() {
                     if self.union_find.same(union_fwd, existing) {
                         union_rep = existing;
+                        found = true;
                         break;
                     }
                 }
                 
+                if !found {
+                    panic!("No node found for union_fwd={}", union_fwd);
+                }
+                
                 let node_id = union_to_node[&union_rep];
                 let handle = Handle::pack(node_id, false);
+                
+                if verbose && i < 5 {
+                    println!("  Seq {} pos {}: union_rep={}, node_id={}", seq.id, i, union_rep, node_id.0);
+                }
                 
                 graph.path_append_step(path_id, handle);
                 
@@ -76,10 +97,17 @@ impl SeqRush {
         
         // Add edges
         let mut seen_edges = HashSet::new();
-        for edge in all_edges {
+        let mut edge_count = 0;
+        for edge in &all_edges {
             let key = (edge.0.as_integer(), edge.1.as_integer());
             if seen_edges.insert(key) {
-                graph.create_edge(edge);
+                graph.create_edge(*edge);
+                edge_count += 1;
+                
+                if verbose && edge_count <= 5 {
+                    println!("  Edge {}: {} -> {} (handles: {:?} -> {:?})", 
+                             edge_count, edge.0.id().0, edge.1.id().0, edge.0, edge.1);
+                }
             }
         }
         
@@ -112,10 +140,16 @@ impl SeqRush {
         writeln!(writer, "H\tVN:Z:1.0")?;
         
         // Write nodes
-        for node_id in (&final_graph).handles() {
-            let handle = Handle::pack(node_id, false);
+        let mut node_count = 0;
+        for handle in (&final_graph).handles() {
+            let node_id = handle.id();
             let seq: Vec<u8> = (&final_graph).sequence(handle).collect();
             writeln!(writer, "S\t{}\t{}", node_id.0, String::from_utf8_lossy(&seq))?;
+            node_count += 1;
+            
+            if verbose && node_count <= 5 {
+                println!("  Writing node {}: handle={:?}", node_id.0, handle);
+            }
         }
         
         // Write edges  
