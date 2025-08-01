@@ -17,6 +17,8 @@ pub mod seqwish_style;
 pub mod bidirected_compaction;
 pub mod embedded_graph;
 pub mod embedded_builder;
+pub mod handlegraph_builder;
+pub mod unchop;
 
 #[cfg(test)]
 mod compaction_tests;

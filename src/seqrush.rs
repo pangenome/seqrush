@@ -9,8 +9,10 @@ use crate::graph_ops::{Graph, Node, Edge};
 use crate::bidirected_union_find::BidirectedUnionFind;
 use crate::pos::{Pos, make_pos};
 use crate::bidirected_ops::BidirectedGraph;
-use crate::embedded_graph::EmbeddedGraph;
 use crate::embedded_builder::convert_to_embedded;
+use handlegraph::handle::Handle as HgHandle;
+use handlegraph::handlegraph::HandleGraph;
+use handlegraph::pathhandlegraph::embedded_paths::{GraphPaths, IntoPathIds};
 use allwave::{AllPairIterator, AlignmentParams, SparsificationStrategy};
 use sha2::{Sha256, Digest};
 
@@ -64,6 +66,10 @@ pub struct Args {
     /// Use embedded graph for compaction (experimental)
     #[arg(long = "use-embedded", default_value = "false")]
     pub use_embedded: bool,
+    
+    /// Use handlegraph library for graph representation
+    #[arg(long = "use-handlegraph", default_value = "false")]
+    pub use_handlegraph: bool,
     
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
     #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
@@ -762,6 +768,76 @@ impl SeqRush {
         // Compute path hashes before compaction
         let _path_hashes_before = self.compute_path_hashes(&bi_graph);
         let _graph_size_before = self.compute_graph_size(&bi_graph);
+        
+        // Use handlegraph if requested
+        if args.use_handlegraph {
+            if verbose {
+                println!("Building handlegraph representation...");
+            }
+            
+            let mut graph = self.build_handlegraph(verbose)?;
+            
+            if !args.no_compact {
+                if verbose {
+                    println!("Applying unchop compaction...");
+                }
+                let nodes_before = graph.node_count();
+                crate::unchop::unchop(&mut graph, verbose)?;
+                let nodes_after = graph.node_count();
+                if verbose {
+                    println!("Compacted {} nodes into {} nodes", nodes_before, nodes_after);
+                }
+            }
+            
+            // Write GFA using handlegraph's API
+            let file = File::create(output_path)?;
+            let mut writer = BufWriter::new(file);
+            
+            // Write header
+            writeln!(writer, "H\tVN:Z:1.0")?;
+            
+            // Write nodes
+            for node_id in graph.handles() {
+                let handle = HgHandle::new(node_id, false);
+                let seq = graph.sequence(handle);
+                writeln!(writer, "S\t{}\t{}", node_id.as_integer(), String::from_utf8_lossy(&seq))?;
+            }
+            
+            // Write edges
+            for edge in graph.edges() {
+                let from = edge.0;
+                let to = edge.1;
+                writeln!(writer, "L\t{}\t{}\t{}\t{}\t0M",
+                        from.id().as_integer(),
+                        if from.is_reverse() { '-' } else { '+' },
+                        to.id().as_integer(), 
+                        if to.is_reverse() { '-' } else { '+' })?;
+            }
+            
+            // Write paths
+            for path_id in graph.path_ids() {
+                let path_name = String::from_utf8_lossy(&graph.path_handle_to_name(&path_id));
+                let mut path_str = String::new();
+                
+                let mut step_idx = 0;
+                for handle in graph.path(&path_id) {
+                    if step_idx > 0 {
+                        path_str.push(',');
+                    }
+                    path_str.push_str(&format!("{}{}",
+                        handle.id().as_integer(),
+                        if handle.is_reverse() { '-' } else { '+' }));
+                    step_idx += 1;
+                }
+                
+                writeln!(writer, "P\t{}\t{}\t*", path_name, path_str)?;
+            }
+            
+            println!("Handlegraph written to {}: {} nodes, {} edges, {} paths", 
+                     output_path, graph.node_count(), graph.edge_count(), graph.path_count());
+            
+            return Ok(());
+        }
         
         // Use embedded graph if requested
         if args.use_embedded {

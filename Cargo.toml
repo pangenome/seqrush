@@ -33,6 +33,10 @@ path = "src/bin/test_embedded_conversion.rs"
 name = "debug_embedded_gfa"
 path = "src/bin/debug_embedded_gfa.rs"
 
+[[bin]]
+name = "test_handlegraph_api"
+path = "src/bin/test_handlegraph_api.rs"
+
 [dependencies]
 lib_wfa2 = { git = "https://github.com/ekg/lib_wfa2", rev = "819b82cd842aabedcb962fd5b82380fe454234f6" }
 allwave = { git = "https://github.com/pangenome/allwave", rev = "788acb0cfbacc00dd4d86663bfe87ba5d39d02c0" }
@@ -45,6 +49,7 @@ serde_json = "1.0"
 rand = "0.8"
 bitvec = "1.0"
 sha2 = "0.10"
+handlegraph = "0.7.0-alpha.9"
 
 [dev-dependencies]
 tempfile = "3"
