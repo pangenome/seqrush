@@ -811,56 +811,15 @@ impl SeqRush {
             return Ok(());
         }
         
-        // Apply compaction unless disabled
-        // Apply compaction if enabled
-        if !args.no_compact {
-            if verbose {
-                println!("Applying perfect neighbor compaction...");
-            }
-            let nodes_before = bi_graph.nodes.len();
-            
-            // Store original sequences before compaction for validation
-            let original_sequences: HashMap<String, Vec<u8>> = bi_graph.paths.iter()
-                .map(|path| {
-                    let seq = path.get_sequence(|id| bi_graph.nodes.get(&id));
-                    (path.name.clone(), seq)
-                })
-                .collect();
-            
-            match bi_graph.compact_perfect_neighbors() {
-                Ok(nodes_compacted) => {
-                    let nodes_after = bi_graph.nodes.len();
-                    if verbose {
-                        println!("Compacted {} nodes into {} nodes ({} nodes removed)", 
-                                nodes_before, nodes_after, nodes_compacted);
-                    }
-                    
-                    // Validate that sequences are preserved
-                    for path in &bi_graph.paths {
-                        let current_seq = path.get_sequence(|id| bi_graph.nodes.get(&id));
-                        if let Some(original_seq) = original_sequences.get(&path.name) {
-                            if current_seq.len() != original_seq.len() {
-                                eprintln!("ERROR: Path '{}' length changed! Original: {}, Current: {}", 
-                                    path.name, original_seq.len(), current_seq.len());
-                                // Debug: show the first few nodes in the path
-                                eprintln!("  Path has {} steps", path.steps.len());
-                                for (i, &handle) in path.steps.iter().enumerate().take(5) {
-                                    if let Some(node) = bi_graph.nodes.get(&handle.node_id()) {
-                                        eprintln!("    Step {}: node {} ({} bp, {})", 
-                                            i, handle.node_id(), node.sequence.len(),
-                                            if handle.is_reverse() { "rev" } else { "fwd" });
-                                    }
-                                }
-                                return Err(format!("Path validation failed after compaction").into());
-                            }
-                        }
-                    }
-                },
-                Err(e) => {
-                    eprintln!("ERROR during compaction: {}", e);
-                    return Err(format!("Compaction failed: {}", e).into());
-                }
-            }
+        // Compaction is disabled in default mode due to bugs
+        if !args.no_compact && !args.use_handlegraph && !args.use_embedded {
+            eprintln!("WARNING: Default bidirected compaction is currently broken and causes path corruption.");
+            eprintln!("Please use one of the following options:");
+            eprintln!("  --no-compact       : Disable compaction (default behavior)");
+            eprintln!("  --use-handlegraph  : Use working handlegraph-based compaction");
+            eprintln!("  --use-embedded     : Use embedded graph mode");
+            eprintln!();
+            eprintln!("Continuing without compaction...");
         }
         
         // LEGACY COMPACTION CODE - DISABLED

@@ -93,6 +93,19 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
         eprintln!("[unchop] Found {} chains to merge", chains.len());
         let total_reduction: usize = chains.iter().map(|c| c.len() - 1).sum();
         eprintln!("[unchop] Will reduce node count by {}", total_reduction);
+        
+        // Show distribution of chain lengths
+        let mut chain_length_dist: HashMap<usize, usize> = HashMap::new();
+        for chain in &chains {
+            *chain_length_dist.entry(chain.len()).or_insert(0) += 1;
+        }
+        let mut sorted_lengths: Vec<_> = chain_length_dist.into_iter().collect();
+        sorted_lengths.sort_by_key(|&(len, _)| len);
+        
+        eprintln!("[unchop] Chain length distribution:");
+        for (len, count) in sorted_lengths.iter().take(10) {
+            eprintln!("  Length {}: {} chains", len, count);
+        }
     }
     
     if chains.is_empty() {
@@ -222,13 +235,18 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
     // Recreate paths
     for path_id in graph.path_ids() {
         let path_name: Vec<u8> = graph.get_path_name(path_id).unwrap().collect();
+        let path_str = String::from_utf8_lossy(&path_name);
+        
         let new_path_id = new_graph.create_path(&path_name, false)
             .ok_or_else(|| "Failed to create path".to_string())?;
         
         let mut last_added: Option<(NodeId, bool)> = None;
+        let mut step_count = 0;
+        let mut new_step_count = 0;
         
         if let Some(path_ref) = graph.get_path_ref(path_id) {
             for step in path_ref.steps() {
+                step_count += 1;
                 let handle = step.1;  // Step is a tuple (StepIx, Handle)
                 let old_id = handle.id();
                 let new_id = node_mapping[&old_id];
@@ -237,13 +255,22 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
                 // Skip consecutive steps that map to same node
                 if let Some((last_id, last_rev)) = last_added {
                     if last_id == new_id && last_rev == is_rev {
+                        if verbose && step_count < 20 {
+                            eprintln!("[unchop] Path {} step {}: skipping duplicate node {:?} ({})", 
+                                     path_str, step_count, new_id, if is_rev { "-" } else { "+" });
+                        }
                         continue;
                     }
                 }
                 
                 new_graph.path_append_step(new_path_id, Handle::pack(new_id, is_rev));
+                new_step_count += 1;
                 last_added = Some((new_id, is_rev));
             }
+        }
+        
+        if verbose {
+            eprintln!("[unchop] Path {}: {} steps -> {} steps", path_str, step_count, new_step_count);
         }
     }
     
