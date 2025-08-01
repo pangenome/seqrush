@@ -1,6 +1,7 @@
 use handlegraph::handle::{Handle, NodeId, Edge};
 use handlegraph::mutablehandlegraph::AdditiveHandleGraph;
-use handlegraph::pathhandlegraph::embedded_paths::{MutableGraphPaths, GraphPaths};
+use handlegraph::pathhandlegraph::embedded_paths::{MutableGraphPaths, GraphPaths, IntoPathIds, GraphPathNames, GraphPathsRef};
+use handlegraph::pathhandlegraph::path::PathSteps;
 use handlegraph::hashgraph::HashGraph;
 use handlegraph::handlegraph::{HandleGraph, IntoHandles, IntoEdges, IntoSequences};
 
@@ -88,10 +89,20 @@ impl SeqRush {
         }
         
         // Apply compaction if requested
-        let final_graph = graph; // Temporarily disable compaction due to API issues
-        if !no_compact && verbose {
-            eprintln!("[Warning] Compaction temporarily disabled due to handlegraph API issues");
-        }
+        let final_graph = if !no_compact {
+            if verbose {
+                eprintln!("[unchop] Applying graph compaction...");
+            }
+            match crate::simple_unchop::simple_unchop(&graph, verbose) {
+                Ok(compacted) => compacted,
+                Err(e) => {
+                    eprintln!("Warning: Compaction failed: {}", e);
+                    graph
+                }
+            }
+        } else {
+            graph
+        };
         
         // Write GFA
         let file = std::fs::File::create(output_path)?;
@@ -116,35 +127,26 @@ impl SeqRush {
                     if edge.1.is_reverse() { '-' } else { '+' })?;
         }
         
-        // Write paths
-        // For now, we'll iterate through the sequences to write paths
-        // since the handlegraph API for path iteration is unclear
-        for (seq_idx, seq) in self.sequences.iter().enumerate() {
+        // Write paths from the final graph
+        for path_id in (&final_graph).path_ids() {
+            let path_name: Vec<u8> = (&final_graph).get_path_name(path_id).unwrap().collect();
             let mut path_str = String::new();
             let mut step_idx = 0;
             
-            // Build path by following the sequence through the graph
-            for i in 0..seq.data.len() {
-                let global_pos = seq.offset + i;
-                let pos_fwd = make_pos(global_pos, false);
-                let union_fwd = self.union_find.find(pos_fwd);
-                
-                // Find the node for this union
-                for (union_rep, &node_id) in &union_to_node {
-                    if self.union_find.same(union_fwd, *union_rep) {
-                        if step_idx > 0 {
-                            path_str.push(',');
-                        }
-                        path_str.push_str(&format!("{}{}",
-                            u64::from(node_id),
-                            '+'));
-                        step_idx += 1;
-                        break;
+            if let Some(path_ref) = (&final_graph).get_path_ref(path_id) {
+                for step in path_ref.steps() {
+                    let handle = step.1;  // Step is a tuple (StepIx, Handle)
+                    if step_idx > 0 {
+                        path_str.push(',');
                     }
+                    path_str.push_str(&format!("{}{}",
+                        u64::from(handle.id()),
+                        if handle.is_reverse() { '-' } else { '+' }));
+                    step_idx += 1;
                 }
             }
             
-            writeln!(writer, "P\t{}\t{}\t*", seq.id, path_str)?;
+            writeln!(writer, "P\t{}\t{}\t*", String::from_utf8_lossy(&path_name), path_str)?;
         }
         
         println!("Handlegraph written to {}: {} nodes, {} edges, {} paths",

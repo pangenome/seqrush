@@ -20,7 +20,7 @@ pub mod embedded_builder;
 // pub mod handlegraph_builder;  // Replaced by simple_handlegraph
 // pub mod unchop;  // Replaced by handlegraph_unchop
 // pub mod handlegraph_builder_v2;  // Replaced by simple_handlegraph
-// pub mod handlegraph_unchop;  // Temporarily disabled due to API issues
+pub mod simple_unchop;
 pub mod simple_handlegraph;
 
 #[cfg(test)]
