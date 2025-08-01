@@ -17,8 +17,11 @@ pub mod seqwish_style;
 pub mod bidirected_compaction;
 pub mod embedded_graph;
 pub mod embedded_builder;
-pub mod handlegraph_builder;
-pub mod unchop;
+// pub mod handlegraph_builder;  // Replaced by simple_handlegraph
+// pub mod unchop;  // Replaced by handlegraph_unchop
+// pub mod handlegraph_builder_v2;  // Replaced by simple_handlegraph
+// pub mod handlegraph_unchop;  // Temporarily disabled due to API issues
+pub mod simple_handlegraph;
 
 #[cfg(test)]
 mod compaction_tests;
