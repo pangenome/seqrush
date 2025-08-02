@@ -121,7 +121,7 @@ impl SeqRush {
             if verbose {
                 eprintln!("[unchop] Applying graph compaction...");
             }
-            match crate::simple_unchop::simple_unchop(&graph, verbose) {
+            match crate::bidirected_unchop::bidirected_unchop(&graph, verbose) {
                 Ok(compacted) => compacted,
                 Err(e) => {
                     eprintln!("Warning: Compaction failed: {}", e);

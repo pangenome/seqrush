@@ -61,13 +61,6 @@ pub struct Args {
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
     
-    /// Use embedded graph for compaction (experimental)
-    #[arg(long = "use-embedded", default_value = "false")]
-    pub use_embedded: bool,
-    
-    /// Use handlegraph library for graph representation
-    #[arg(long = "use-handlegraph", default_value = "false")]
-    pub use_handlegraph: bool,
     
     /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
     #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
@@ -80,10 +73,6 @@ pub struct Args {
     /// Validate PAF records as they are generated (helps catch bugs immediately)
     #[arg(long = "validate-paf", default_value = "true")]
     pub validate_paf: bool,
-    
-    /// Use seqwish-style range-based graph construction (experimental)
-    #[arg(long = "seqwish-style", default_value = "false")]
-    pub seqwish_style: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -760,127 +749,8 @@ impl SeqRush {
         let verbose = args.verbose;
         let _test_mode = args.test_mode;
         
-        // Build bidirected graph from union-find
-        let mut bi_graph = self.build_bidirected_graph(verbose)?;
-        
-        // Compute path hashes before compaction
-        let _path_hashes_before = self.compute_path_hashes(&bi_graph);
-        let _graph_size_before = self.compute_graph_size(&bi_graph);
-        
-        // Use handlegraph if requested
-        if args.use_handlegraph {
-            return self.write_handlegraph_gfa(output_path, args.no_compact, verbose);
-        }
-        
-        // Use embedded graph if requested
-        if args.use_embedded {
-            if verbose {
-                println!("Converting to embedded graph for compaction...");
-            }
-            
-            // Convert to embedded graph
-            let mut embedded = convert_to_embedded(&bi_graph)?;
-            
-            if !args.no_compact {
-                if verbose {
-                    println!("Applying embedded graph compaction...");
-                }
-                let nodes_before = embedded.nodes.len();
-                match embedded.compact() {
-                    Ok(merged) => {
-                        let nodes_after = embedded.nodes.len();
-                        if verbose {
-                            println!("Compacted {} nodes into {} nodes ({} pairs merged)", 
-                                    nodes_before, nodes_after, merged);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("WARNING: Embedded compaction failed: {}", e);
-                    }
-                }
-            }
-            
-            // Write embedded graph
-            let file = File::create(output_path)?;
-            let mut writer = BufWriter::new(file);
-            embedded.write_gfa(&mut writer)?;
-            
-            println!("Embedded graph written to {}: {} nodes, {} paths", 
-                     output_path, embedded.nodes.len(), embedded.paths.len());
-            
-            return Ok(());
-        }
-        
-        // Compaction is disabled in default mode due to bugs
-        if !args.no_compact && !args.use_handlegraph && !args.use_embedded {
-            eprintln!("WARNING: Default bidirected compaction is currently broken and causes path corruption.");
-            eprintln!("Please use one of the following options:");
-            eprintln!("  --no-compact       : Disable compaction (default behavior)");
-            eprintln!("  --use-handlegraph  : Use working handlegraph-based compaction");
-            eprintln!("  --use-embedded     : Use embedded graph mode");
-            eprintln!();
-            eprintln!("Continuing without compaction...");
-        }
-        
-        // LEGACY COMPACTION CODE - DISABLED
-        /*
-        if false {
-            if verbose {
-                println!("Applying graph compaction...");
-            }
-            let nodes_before = bi_graph.nodes.len();
-            bi_graph.compact();
-            let nodes_after = bi_graph.nodes.len();
-            if verbose {
-                println!("Compacted {} nodes into {} nodes", nodes_before, nodes_after);
-            }
-            
-            // Validate compaction
-            let path_hashes_after = self.compute_path_hashes(&bi_graph);
-            let graph_size_after = self.compute_graph_size(&bi_graph);
-            
-            // Check that paths are preserved
-            for (path_name, hash_before) in &path_hashes_before {
-                if let Some(hash_after) = path_hashes_after.get(path_name) {
-                    if hash_before != hash_after {
-                        eprintln!("ERROR: Path '{}' changed during compaction!", path_name);
-                        eprintln!("  Hash before: {}", hash_before.iter().map(|b| format!("{:02x}", b)).collect::<String>());
-                        eprintln!("  Hash after:  {}", hash_after.iter().map(|b| format!("{:02x}", b)).collect::<String>());
-                        return Err("Path corruption during compaction".into());
-                    }
-                } else {
-                    eprintln!("ERROR: Path '{}' disappeared during compaction!", path_name);
-                    return Err("Path lost during compaction".into());
-                }
-            }
-            
-            // Check that total graph size is preserved
-            if graph_size_before != graph_size_after {
-                eprintln!("ERROR: Graph size changed during compaction!");
-                eprintln!("  Size before: {} bp", graph_size_before);
-                eprintln!("  Size after:  {} bp", graph_size_after);
-                return Err("Graph size changed during compaction".into());
-            }
-            
-            if verbose {
-                println!("Validation passed: all paths preserved, graph size unchanged");
-            }
-        }
-        */
-        
-        // Also validate that paths match original sequences
-        // TODO: Fix path validation - there are issues with how PAF alignments are processed
-        // self.validate_paths_match_sequences(&bi_graph)?;
-        
-        // Write bidirected graph
-        let file = File::create(output_path)?;
-        let mut writer = BufWriter::new(file);
-        bi_graph.write_gfa(&mut writer)?;
-        
-        println!("Graph written to {}: {} nodes, {} edges", 
-                 output_path, bi_graph.nodes.len(), bi_graph.edges.len());
-        
-        Ok(())
+        // Always use handlegraph implementation
+        self.write_handlegraph_gfa(output_path, args.no_compact, verbose)
     }
     
     fn build_initial_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {

@@ -23,12 +23,16 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
     let mut successors: HashMap<NodeId, NodeId> = HashMap::new();
     
     // Count edges and track neighbors
+    let mut total_edges = 0;
+    let mut skipped_edges = 0;
     for edge in graph.edges() {
+        total_edges += 1;
         let from_id = edge.0.id();
         let to_id = edge.1.id();
         
         // Skip self-loops and reverse edges for now
         if from_id == to_id || edge.0.is_reverse() || edge.1.is_reverse() {
+            skipped_edges += 1;
             continue;
         }
         
@@ -90,6 +94,8 @@ pub fn simple_unchop(graph: &HashGraph, verbose: bool) -> Result<HashGraph, Stri
     }
     
     if verbose {
+        eprintln!("[unchop] Processed {}/{} edges (skipped {} with reverse orientations)", 
+                 total_edges - skipped_edges, total_edges, skipped_edges);
         eprintln!("[unchop] Found {} chains to merge", chains.len());
         let total_reduction: usize = chains.iter().map(|c| c.len() - 1).sum();
         eprintln!("[unchop] Will reduce node count by {}", total_reduction);

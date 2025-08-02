@@ -22,6 +22,9 @@ pub mod embedded_builder;
 // pub mod handlegraph_builder_v2;  // Replaced by simple_handlegraph
 pub mod simple_unchop;
 pub mod simple_handlegraph;
+pub mod handlegraph_unchop_proper;
+pub mod bidirected_unchop;
+pub mod utils;
 
 #[cfg(test)]
 mod compaction_tests;
