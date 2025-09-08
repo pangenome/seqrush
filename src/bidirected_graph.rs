@@ -40,7 +40,11 @@ impl Handle {
 
     /// Get the orientation sign as a char ('+' or '-')
     pub fn orientation_char(&self) -> char {
-        if self.is_reverse() { '-' } else { '+' }
+        if self.is_reverse() {
+            '-'
+        } else {
+            '+'
+        }
     }
 
     /// Flip the orientation of this handle
@@ -222,14 +226,14 @@ mod tests {
     fn test_path_sequence() {
         let node1 = BiNode::new(1, b"ATG".to_vec());
         let node2 = BiNode::new(2, b"CGA".to_vec());
-        
+
         let mut path = BiPath::new("test".to_string());
         path.add_step(Handle::forward(1));
         path.add_step(Handle::reverse(2));
-        
+
         let nodes = [None, Some(&node1), Some(&node2)];
         let get_node = |id: usize| nodes.get(id).and_then(|n| *n);
-        
+
         let seq = path.get_sequence(get_node);
         assert_eq!(seq, b"ATGTCG"); // ATG + reverse_complement(CGA)
     }

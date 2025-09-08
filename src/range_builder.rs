@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use crate::bidirected_graph::{BiNode, BiPath, Handle};
 use crate::bidirected_ops::BidirectedGraph;
-use crate::bidirected_graph::{Handle, BiNode, BiPath};
+use std::collections::{HashMap, HashSet};
 
 /// Represents an alignment range between sequences
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,7 +37,10 @@ impl RangeBasedGraphBuilder {
     }
 
     /// Build graph like seqwish does
-    pub fn build_graph(&self, verbose: bool) -> Result<BidirectedGraph, Box<dyn std::error::Error>> {
+    pub fn build_graph(
+        &self,
+        verbose: bool,
+    ) -> Result<BidirectedGraph, Box<dyn std::error::Error>> {
         if verbose {
             eprintln!("Building graph from {} alignment ranges", self.ranges.len());
         }
@@ -46,7 +49,7 @@ impl RangeBasedGraphBuilder {
         let mut graph_seq = Vec::new();
         let mut seq_offsets = Vec::new();
         let mut total_offset = 0;
-        
+
         for (_, data) in &self.sequences {
             seq_offsets.push(total_offset);
             graph_seq.extend_from_slice(data);
@@ -56,7 +59,7 @@ impl RangeBasedGraphBuilder {
         // Step 2: Build interval trees for alignments (like seqwish's node_iitree and path_iitree)
         // For now, we'll use a simpler approach with HashMaps
         let mut position_to_ranges: HashMap<usize, Vec<usize>> = HashMap::new();
-        
+
         // Add self-alignments first (each sequence maps to itself)
         let mut all_ranges = self.ranges.clone();
         for (seq_idx, (_, data)) in self.sequences.iter().enumerate() {
@@ -74,19 +77,19 @@ impl RangeBasedGraphBuilder {
         // Step 3: Mark node boundaries (like seqwish's compact_nodes)
         let mut node_boundaries = HashSet::new();
         node_boundaries.insert(0); // First position is always a boundary
-        
+
         // For each alignment range, mark start and end as boundaries
         for (range_idx, range) in all_ranges.iter().enumerate() {
             // Mark boundaries in graph sequence
             node_boundaries.insert(range.seq1_start);
             node_boundaries.insert(range.seq1_end);
-            
+
             // Track which positions are covered by this range
             for pos in range.seq1_start..range.seq1_end {
                 position_to_ranges.entry(pos).or_default().push(range_idx);
             }
         }
-        
+
         node_boundaries.insert(graph_seq.len()); // Last position is always a boundary
 
         // Convert boundaries to sorted vector
@@ -105,14 +108,14 @@ impl RangeBasedGraphBuilder {
         for i in 0..boundaries.len() - 1 {
             let start = boundaries[i];
             let end = boundaries[i + 1];
-            
+
             if start >= end {
                 continue;
             }
 
             // Extract sequence for this node
             let node_seq = graph_seq[start..end].to_vec();
-            
+
             // Create the node
             let bi_node = BiNode {
                 id: node_id,
@@ -127,9 +130,13 @@ impl RangeBasedGraphBuilder {
             }
 
             if verbose && node_id <= 5 {
-                eprintln!("Created node {} spanning positions {}..{} with sequence '{}'", 
-                    node_id, start, end, 
-                    String::from_utf8_lossy(&graph.nodes[&node_id].sequence));
+                eprintln!(
+                    "Created node {} spanning positions {}..{} with sequence '{}'",
+                    node_id,
+                    start,
+                    end,
+                    String::from_utf8_lossy(&graph.nodes[&node_id].sequence)
+                );
             }
 
             node_id += 1;
@@ -160,7 +167,9 @@ impl RangeBasedGraphBuilder {
         }
 
         // Step 6: Add edges between consecutive nodes in paths
-        let edges_to_add: Vec<(Handle, Handle)> = graph.paths.iter()
+        let edges_to_add: Vec<(Handle, Handle)> = graph
+            .paths
+            .iter()
             .flat_map(|path| {
                 if path.steps.len() > 1 {
                     (0..path.steps.len() - 1)
@@ -171,7 +180,7 @@ impl RangeBasedGraphBuilder {
                 }
             })
             .collect();
-        
+
         for (from, to) in edges_to_add {
             graph.add_edge(from, to);
         }

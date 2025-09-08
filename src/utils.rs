@@ -4,7 +4,7 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
         .rev()
         .map(|&b| match b {
             b'A' | b'a' => b'T',
-            b'T' | b't' => b'A', 
+            b'T' | b't' => b'A',
             b'C' | b'c' => b'G',
             b'G' | b'g' => b'C',
             b'N' | b'n' => b'N',

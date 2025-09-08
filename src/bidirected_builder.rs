@@ -1,37 +1,45 @@
-use crate::bidirected_graph::{Handle, BiEdge};
+use crate::bidirected_graph::{BiEdge, Handle};
 use crate::bidirected_ops::BidirectedGraph;
-use crate::pos::{Pos, make_pos, offset};
-use crate::graph_ops::{Graph, Node, Edge};
+use crate::graph_ops::{Edge, Graph, Node};
+use crate::pos::{make_pos, offset, Pos};
 use crate::seqrush::{SeqRush, Sequence};
 use std::collections::HashMap;
 
 impl SeqRush {
     /// Build a bidirected graph from the union-find results
-    pub fn build_bidirected_graph(&self, verbose: bool) -> Result<BidirectedGraph, Box<dyn std::error::Error>> {
+    pub fn build_bidirected_graph(
+        &self,
+        verbose: bool,
+    ) -> Result<BidirectedGraph, Box<dyn std::error::Error>> {
         let mut graph = BidirectedGraph::new();
-        
+
         // Track which union representatives we've seen and their node IDs
         let mut union_to_node: HashMap<Pos, usize> = HashMap::new();
         let mut next_node_id = 1;
-        
+
         // Build paths and discover nodes
         for (seq_idx, seq) in self.sequences.iter().enumerate() {
             if verbose {
-                eprintln!("Building path for sequence {} of {}: {}", seq_idx + 1, self.sequences.len(), seq.id);
+                eprintln!(
+                    "Building path for sequence {} of {}: {}",
+                    seq_idx + 1,
+                    self.sequences.len(),
+                    seq.id
+                );
             }
             let mut path_handles = Vec::new();
-            
+
             for i in 0..seq.data.len() {
                 let global_pos = seq.offset + i;
-                
+
                 // For each position in the sequence, we need to determine which orientation to use
                 let pos_fwd = make_pos(global_pos, false);
                 let pos_rev = make_pos(global_pos, true);
-                
+
                 // Find which orientation belongs to which union
                 let union_fwd = self.union_find.find(pos_fwd);
                 let union_rev = self.union_find.find(pos_rev);
-                
+
                 // For this position, check which orientation (if any) has already been
                 // mapped to a node.
                 let (union_rep, path_orientation) = if union_to_node.contains_key(&union_fwd) {
@@ -44,11 +52,11 @@ impl SeqRush {
                     // Neither exact union is in the map. But they might be united with
                     // other unions that ARE in the map. We need to find the canonical
                     // representative of this union component.
-                    
+
                     // Get all representatives in the union-find
                     let fwd_root = self.union_find.find(pos_fwd);
                     let rev_root = self.union_find.find(pos_rev);
-                    
+
                     // Check if these roots are already mapped
                     if union_to_node.contains_key(&fwd_root) {
                         (fwd_root, false)
@@ -59,35 +67,49 @@ impl SeqRush {
                         // was united with something else that's already in the map.
                         // This happens with RC alignments where pos_fwd might be united
                         // with some other_pos_rev.
-                        
+
                         let mut found = None;
-                        
+
                         if verbose && seq.id == "seq2" && i == 0 {
-                            eprintln!("  Searching for existing unions connected to fwd={} or rev={}", union_fwd, union_rev);
-                            eprintln!("  Testing: is union 8 same as union 6? {}", self.union_find.same(make_pos(4, false), make_pos(3, false)));
-                            eprintln!("  Testing: is union 8 same as existing union 6? {}", 
-                                self.union_find.same(union_fwd, make_pos(3, false)));
+                            eprintln!(
+                                "  Searching for existing unions connected to fwd={} or rev={}",
+                                union_fwd, union_rev
+                            );
+                            eprintln!(
+                                "  Testing: is union 8 same as union 6? {}",
+                                self.union_find.same(make_pos(4, false), make_pos(3, false))
+                            );
+                            eprintln!(
+                                "  Testing: is union 8 same as existing union 6? {}",
+                                self.union_find.same(union_fwd, make_pos(3, false))
+                            );
                         }
-                        
+
                         for &existing_union in union_to_node.keys() {
                             // Check if current position's forward union is in same component
                             if self.union_find.same(union_fwd, existing_union) {
                                 if verbose && seq.id == "seq2" && i == 0 {
-                                    eprintln!("    Found! union {} is same as existing union {}", union_fwd, existing_union);
+                                    eprintln!(
+                                        "    Found! union {} is same as existing union {}",
+                                        union_fwd, existing_union
+                                    );
                                 }
                                 found = Some((existing_union, false));
                                 break;
                             }
-                            // Check if current position's reverse union is in same component  
+                            // Check if current position's reverse union is in same component
                             if self.union_find.same(union_rev, existing_union) {
                                 if verbose && seq.id == "seq2" && i == 0 {
-                                    eprintln!("    Found! union {} is same as existing union {}", union_rev, existing_union);
+                                    eprintln!(
+                                        "    Found! union {} is same as existing union {}",
+                                        union_rev, existing_union
+                                    );
                                 }
                                 found = Some((existing_union, true));
                                 break;
                             }
                         }
-                        
+
                         if let Some((existing, orientation)) = found {
                             (existing, orientation)
                         } else {
@@ -96,7 +118,7 @@ impl SeqRush {
                         }
                     }
                 };
-                
+
                 if verbose && (i < 5 || seq.id == "seq2") {
                     eprintln!("  [BIDIRECTED] {} pos {} - fwd_union: {}, rev_union: {}, chosen: {} (orientation: {})", 
                         seq.id, i, union_fwd, union_rev, union_rep, if path_orientation { "rev" } else { "fwd" });
@@ -110,7 +132,7 @@ impl SeqRush {
                         }
                     }
                 }
-                
+
                 // Get or create node ID
                 let node_id = match union_to_node.get(&union_rep) {
                     Some(&id) => id,
@@ -118,57 +140,73 @@ impl SeqRush {
                         let id = next_node_id;
                         next_node_id += 1;
                         union_to_node.insert(union_rep, id);
-                        
+
                         // CRITICAL: Also map all other unions in this component to the same node!
                         // This ensures that when we encounter the same component through a different
                         // orientation or position, we'll find the existing node.
                         // Check both orientations of the current position
-                        if self.union_find.same(pos_fwd, union_rep) && !union_to_node.contains_key(&union_fwd) {
+                        if self.union_find.same(pos_fwd, union_rep)
+                            && !union_to_node.contains_key(&union_fwd)
+                        {
                             union_to_node.insert(union_fwd, id);
                         }
-                        if self.union_find.same(pos_rev, union_rep) && !union_to_node.contains_key(&union_rev) {
+                        if self.union_find.same(pos_rev, union_rep)
+                            && !union_to_node.contains_key(&union_rev)
+                        {
                             union_to_node.insert(union_rev, id);
                         }
-                        
+
                         // Create node with the base from the union representative position
-                        let base = if let Some(source_seq) = self.find_sequence_for_position(union_rep) {
-                            let local_offset = offset(union_rep) - source_seq.offset;
-                            source_seq.data[local_offset]
-                        } else {
-                            seq.data[i] // Fallback to current sequence's base
-                        };
-                        
+                        let base =
+                            if let Some(source_seq) = self.find_sequence_for_position(union_rep) {
+                                let local_offset = offset(union_rep) - source_seq.offset;
+                                source_seq.data[local_offset]
+                            } else {
+                                seq.data[i] // Fallback to current sequence's base
+                            };
+
                         graph.add_node(id, vec![base]);
                         id
                     }
                 };
-                
+
                 // Add handle with determined orientation to path
                 let handle = Handle::new(node_id, path_orientation);
                 path_handles.push(handle);
             }
-            
+
             // Build path with handles
-            graph.build_path(seq.id.clone(), 
-                path_handles.iter().map(|h| (h.node_id(), h.is_reverse())).collect());
+            graph.build_path(
+                seq.id.clone(),
+                path_handles
+                    .iter()
+                    .map(|h| (h.node_id(), h.is_reverse()))
+                    .collect(),
+            );
         }
-        
+
         // Build edges from paths
-        let edges_to_add: Vec<(Handle, Handle)> = graph.paths.iter()
+        let edges_to_add: Vec<(Handle, Handle)> = graph
+            .paths
+            .iter()
             .flat_map(|path| {
                 (0..path.steps.len().saturating_sub(1))
                     .map(move |i| (path.steps[i], path.steps[i + 1]))
             })
             .collect();
-            
+
         for (from, to) in edges_to_add {
             graph.add_edge(from, to);
         }
-        
+
         if verbose {
-            println!("Built bidirected graph: {} nodes, {} edges, {} paths", 
-                     graph.nodes.len(), graph.edges.len(), graph.paths.len());
-            
+            println!(
+                "Built bidirected graph: {} nodes, {} edges, {} paths",
+                graph.nodes.len(),
+                graph.edges.len(),
+                graph.paths.len()
+            );
+
             // Debug: count unique union representatives
             let mut unique_unions = std::collections::HashSet::new();
             for seq in &self.sequences {
@@ -179,26 +217,32 @@ impl SeqRush {
                     unique_unions.insert(union_fwd);
                 }
             }
-            println!("Debug: {} unique union representatives from {} total positions", 
-                     unique_unions.len(), self.sequences.iter().map(|s| s.data.len()).sum::<usize>());
+            println!(
+                "Debug: {} unique union representatives from {} total positions",
+                unique_unions.len(),
+                self.sequences.iter().map(|s| s.data.len()).sum::<usize>()
+            );
         }
-        
+
         Ok(graph)
     }
-    
+
     /// Convert bidirected graph back to simple graph (temporary compatibility)
     pub fn bidirected_to_simple_graph(&self, bi_graph: BidirectedGraph) -> Graph {
         let mut graph = Graph::new();
-        
+
         // Convert nodes
         for (id, bi_node) in bi_graph.nodes {
-            graph.nodes.insert(id, Node {
+            graph.nodes.insert(
                 id,
-                sequence: bi_node.sequence,
-                rank: bi_node.rank.unwrap_or(id as u64) as f64,
-            });
+                Node {
+                    id,
+                    sequence: bi_node.sequence,
+                    rank: bi_node.rank.unwrap_or(id as u64) as f64,
+                },
+            );
         }
-        
+
         // Convert edges (lose orientation information)
         for edge in bi_graph.edges {
             graph.edges.insert(Edge {
@@ -206,23 +250,22 @@ impl SeqRush {
                 to: edge.to.node_id(),
             });
         }
-        
-        // Convert paths (lose orientation information)  
+
+        // Convert paths (lose orientation information)
         for path in bi_graph.paths {
-            let simple_path: Vec<usize> = path.steps.iter()
-                .map(|handle| handle.node_id())
-                .collect();
+            let simple_path: Vec<usize> =
+                path.steps.iter().map(|handle| handle.node_id()).collect();
             graph.paths.push((path.name, simple_path));
         }
-        
+
         graph
     }
-    
+
     /// Find which sequence contains a given position
     fn find_sequence_for_position(&self, pos: Pos) -> Option<&Sequence> {
         let offset_val = offset(pos);
-        self.sequences.iter().find(|seq| {
-            offset_val >= seq.offset && offset_val < seq.offset + seq.data.len()
-        })
+        self.sequences
+            .iter()
+            .find(|seq| offset_val >= seq.offset && offset_val < seq.offset + seq.data.len())
     }
 }
