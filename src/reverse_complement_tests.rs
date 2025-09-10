@@ -62,6 +62,7 @@ mod reverse_complement_tests {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         // Build the graph
@@ -118,6 +119,7 @@ mod reverse_complement_tests {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         run_seqrush(args).unwrap();
@@ -184,6 +186,7 @@ mod reverse_complement_tests {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         run_seqrush(args).unwrap();
@@ -304,6 +307,7 @@ mod reverse_complement_tests {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         run_seqrush(args).unwrap();

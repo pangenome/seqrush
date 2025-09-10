@@ -1,0 +1,18 @@
+[package]
+name = "succinct"
+version = "0.5.2"
+authors = ["Jesse A. Tov <jesse.tov@gmail.com>"]
+description = "Succinct data structures for Rust"
+repository = "https://github.com/tov/succinct-rs"
+homepage = "https://github.com/tov/succinct-rs"
+documentation = "https://docs.rs/succinct/"
+readme = "README.md"
+license = "MIT/Apache-2.0"
+keywords = ["succinct", "rank", "select"]
+
+[dependencies]
+num-traits = "0.2"
+byteorder = "1.2"
+
+[dev-dependencies]
+quickcheck = "0.9.0"

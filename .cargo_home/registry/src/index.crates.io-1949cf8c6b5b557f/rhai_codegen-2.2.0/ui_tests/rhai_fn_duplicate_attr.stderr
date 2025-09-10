@@ -1,0 +1,17 @@
+error: duplicated attribute 'rhai_fn'
+ --> ui_tests/rhai_fn_duplicate_attr.rs:6:5
+  |
+6 |     #[rhai_fn(pure)]
+  |     ^
+
+error[E0425]: cannot find value `n` in this scope
+  --> ui_tests/rhai_fn_duplicate_attr.rs:13:29
+   |
+13 |     if test_module::test_fn(n) {
+   |                             ^ not found in this scope
+
+error[E0433]: failed to resolve: use of undeclared crate or module `test_module`
+  --> ui_tests/rhai_fn_duplicate_attr.rs:13:8
+   |
+13 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared crate or module `test_module`

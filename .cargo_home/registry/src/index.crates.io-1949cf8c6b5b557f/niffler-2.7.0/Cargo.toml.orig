@@ -1,0 +1,98 @@
+[package]
+name = "niffler"
+version = "2.7.0"
+authors = ["Pierre Marijon <pierre@marijon.fr>", "Luiz Irber <luiz.irber@gmail.com>"]
+description = "Simple and transparent support for compressed files"
+license = "MIT/Apache-2.0"
+repository = "https://github.com/luizirber/niffler"
+homepage = "https://github.com/luizirber/niffler"
+readme = "README.md"
+documentation = "https://docs.rs/niffler"
+edition = "2021"
+rust-version = "1.74"
+
+[features]
+default = ["bz2", "lzma", "xz", "gz", "bgz", "zstd"]
+bz2 = ["bzip2"]
+lzma = ["liblzma"]
+gz = ["flate2"]
+bgz = ["bgzip"]
+xz = ["lzma"]
+
+# bzip2 feature transitivity
+bz2_tokio = ["bzip2/tokio"]
+bz2_static = ["bzip2/static"]
+
+# lzma feature transitivity
+lzma_tokio = ["liblzma/tokio"]
+
+# flate2 feature transitivity
+gz_zlib = ["flate2/zlib"]
+gz_zlib-ng-compat = ["flate2/zlib-ng-compat"]
+gz_zlib-ng = ["flate2/zlib-ng"]
+gz_cloudflare_zlib = ["flate2/cloudflare_zlib"]
+gz_rust_backend = ["flate2/rust_backend"]
+
+# xz feature transitivity
+xz_tokio = ["liblzma/tokio"]
+
+
+[dependencies]
+cfg-if = "1.0"
+thiserror = "2.0"
+bzip2 = { version = "0.4.4", optional = true }
+flate2 = { version = "1.0", optional = true }
+liblzma = { version = "0.3", optional = true }
+bgzip = { version = "0.3", optional = true, default-features = false, features = [
+  "rust_backend",
+] }
+zstd = { version = "0.13", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+criterion = "0.5"
+
+[[bench]]
+name = "detect_format"
+harness = false
+
+[[bench]]
+name = "gzip"
+harness = false
+required-features = ["gz"]
+
+[[bench]]
+name = "bzip2"
+harness = false
+required-features = ["bz2"]
+
+[[bench]]
+name = "lzma"
+harness = false
+required-features = ["xz2"]
+
+
+[package.metadata.cargo-all-features]
+denylist = [
+  # bzip2 feature transitivity
+  "bz2_tokio",
+  "bz2_static",
+
+  # lzma feature transitivity
+  "lzma_tokio",
+
+  # flate2 feature transitivity
+  "gz_zlib",
+  "gz_zlib-ng",
+  "gz_zlib-ng-compat",
+  "gz_cloudflare_zlib",
+  "gz_rust_backend",
+
+  # xz feature transitivity
+  "xz_tokio",
+
+  # xz is an alias to lzma
+  "xz",
+]
+
+skip_optional_dependencies = true

@@ -1,0 +1,71 @@
+[package]
+name = "noodles"
+version = "0.100.0"
+authors = ["Michael Macias <zaeleus@gmail.com>"]
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Bioinformatics I/O libraries"
+homepage = "https://github.com/zaeleus/noodles"
+repository = "https://github.com/zaeleus/noodles"
+documentation = "https://docs.rs/noodles"
+readme = "../README.md"
+categories = ["science::bioinformatics"]
+
+[dependencies]
+noodles-bam = { path = "../noodles-bam", version = "0.82.0", optional = true }
+noodles-bcf = { path = "../noodles-bcf", version = "0.77.0", optional = true }
+noodles-bed = { path = "../noodles-bed", version = "0.27.0", optional = true }
+noodles-bgzf = { path = "../noodles-bgzf", version = "0.42.0", optional = true }
+noodles-core = { path = "../noodles-core", version = "0.18.0", optional = true }
+noodles-cram = { path = "../noodles-cram", version = "0.85.0", optional = true }
+noodles-csi = { path = "../noodles-csi", version = "0.50.0", optional = true }
+noodles-fasta = { path = "../noodles-fasta", version = "0.55.0", optional = true }
+noodles-fastq = { path = "../noodles-fastq", version = "0.20.0", optional = true }
+noodles-gff = { path = "../noodles-gff", version = "0.51.0", optional = true }
+noodles-gtf = { path = "../noodles-gtf", version = "0.46.0", optional = true }
+noodles-htsget = { path = "../noodles-htsget", version = "0.9.0", optional = true }
+noodles-refget = { path = "../noodles-refget", version = "0.8.0", optional = true }
+noodles-sam = { path = "../noodles-sam", version = "0.78.0", optional = true }
+noodles-tabix = { path = "../noodles-tabix", version = "0.56.0", optional = true }
+noodles-vcf = { path = "../noodles-vcf", version = "0.80.0", optional = true }
+
+[features]
+default = []
+
+bam = ["dep:noodles-bam"]
+bcf = ["dep:noodles-bcf"]
+bed = ["dep:noodles-bed"]
+bgzf = ["dep:noodles-bgzf"]
+core = ["dep:noodles-core"]
+cram = ["dep:noodles-cram"]
+csi = ["dep:noodles-csi"]
+fasta = ["dep:noodles-fasta"]
+fastq = ["dep:noodles-fastq"]
+gff = ["dep:noodles-gff"]
+gtf = ["dep:noodles-gtf"]
+htsget = ["dep:noodles-htsget"]
+refget = ["dep:noodles-refget"]
+sam = ["dep:noodles-sam"]
+tabix = ["dep:noodles-tabix"]
+vcf = ["dep:noodles-vcf"]
+
+async = [
+  "noodles-bam?/async",
+  "noodles-bcf?/async",
+  "noodles-bgzf?/async",
+  "noodles-cram?/async",
+  "noodles-csi?/async",
+  "noodles-fasta?/async",
+  "noodles-fastq?/async",
+  "noodles-gff?/async",
+  "noodles-sam?/async",
+  "noodles-tabix?/async",
+  "noodles-vcf?/async",
+]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true

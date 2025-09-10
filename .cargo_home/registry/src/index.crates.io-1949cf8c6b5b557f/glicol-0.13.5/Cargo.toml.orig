@@ -1,0 +1,36 @@
+[package]
+name = "glicol"
+version = { workspace = true }
+edition = { workspace = true }
+keywords = ["audio", "music", "DSP", "synth", "synthesizer"]
+
+license-file = "LICENSE"
+description = "Glicol language main entry point."
+repository = "https://github.com/chaosprint/glicol.git"
+authors = ["Qichao Lan <chaosprint@gmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+use-samples = []
+use-meta = []
+bela = []
+
+[dependencies]
+petgraph = { workspace = true }
+glicol_parser = { version = "0.13.5", path = "../parser" }
+glicol_synth = { version = "0.13.5", path = "../synth", features = [
+    "use-samples",
+    "use-meta",
+] }
+glicol_macros = { version = "0.13.5", path = "../macros" }
+lcs-diff = { workspace = true }
+pest = { workspace = true }
+hashbrown = { workspace = true }
+
+[dev-dependencies]
+gnuplot = "0.0.37"
+# petgraph = { version = "0.6",  features = ["stable_graph"] }
+cpal = "0.14.0"
+anyhow = "1.0.63"

@@ -51,6 +51,7 @@ fn test_performance_scaling() {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         let start = Instant::now();
@@ -136,6 +137,7 @@ fn test_real_world_example() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -174,6 +176,7 @@ fn test_command_line_interface() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -224,6 +227,7 @@ fn test_parallel_consistency() {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         run_seqrush(args).unwrap();

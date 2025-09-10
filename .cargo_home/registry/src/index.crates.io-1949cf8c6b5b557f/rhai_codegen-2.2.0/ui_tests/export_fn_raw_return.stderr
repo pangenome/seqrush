@@ -1,0 +1,12 @@
+error[E0599]: `bool` is not an iterator
+  --> ui_tests/export_fn_raw_return.rs:11:33
+   |
+10 | #[export_fn(return_raw)]
+   | ------------------------ in this procedural macro expansion
+11 | pub fn test_fn(input: Point) -> bool {
+   |                                 ^^^^ `bool` is not an iterator
+   |
+   = note: the following trait bounds were not satisfied:
+           `bool: std::iter::Iterator`
+           which is required by `&mut bool: std::iter::Iterator`
+   = note: this error originates in the attribute macro `export_fn` (in Nightly builds, run with -Z macro-backtrace for more info)

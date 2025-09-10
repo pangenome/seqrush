@@ -187,6 +187,7 @@ fn test_programmatic_inversions_scale() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -249,6 +250,7 @@ fn test_gc_content_variation() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -327,6 +329,7 @@ fn test_motif_based_variations() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -396,6 +399,7 @@ fn test_microsatellite_instability() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -467,6 +471,7 @@ fn test_complex_structural_variation_patterns() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -549,6 +554,7 @@ fn test_nested_tandem_inversions() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();

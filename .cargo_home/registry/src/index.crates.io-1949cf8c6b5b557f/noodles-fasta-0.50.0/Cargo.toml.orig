@@ -1,0 +1,29 @@
+[package]
+name = "noodles-fasta"
+version = "0.50.0"
+authors = ["Michael Macias <zaeleus@gmail.com>"]
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FASTA format reader and writer"
+homepage = "https://github.com/zaeleus/noodles"
+repository = "https://github.com/zaeleus/noodles"
+documentation = "https://docs.rs/noodles-fasta"
+
+[features]
+async = ["dep:tokio"]
+
+[dependencies]
+bstr.workspace = true
+bytes.workspace = true
+memchr.workspace = true
+noodles-bgzf = { path = "../noodles-bgzf", version = "0.37.0" }
+noodles-core = { path = "../noodles-core", version = "0.17.0" }
+
+tokio = { workspace = true, optional = true, features = ["fs", "io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[package.metadata.docs.rs]
+features = ["async"]

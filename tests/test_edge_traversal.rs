@@ -42,6 +42,7 @@ fn test_no_untraversed_edges_in_output() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -109,6 +110,7 @@ fn test_self_loops_in_gfa() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -167,6 +169,7 @@ fn test_complex_graph_produces_valid_gfa() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush(args).unwrap();

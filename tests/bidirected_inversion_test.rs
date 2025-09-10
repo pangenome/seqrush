@@ -40,6 +40,7 @@ fn test_simple_inversion() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -112,6 +113,7 @@ fn test_complex_rearrangement() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -192,6 +194,7 @@ fn test_self_inverse_palindrome() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

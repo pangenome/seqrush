@@ -40,6 +40,7 @@ fn test_inversion_detection_simple() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     println!("Running inversion-aware alignment...");
@@ -102,6 +103,7 @@ fn test_inversion_detection_with_context() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     println!("\nRunning inversion detection with context...");
@@ -144,6 +146,7 @@ fn test_no_inversion() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -184,6 +187,7 @@ fn test_multiple_inversions() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     println!("\nRunning multiple inversion detection...");

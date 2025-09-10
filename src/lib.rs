@@ -3,6 +3,8 @@ pub mod bidirected_compaction;
 pub mod bidirected_graph;
 pub mod bidirected_ops;
 pub mod bidirected_union_find;
+// pub mod odgi_topological_sort;  // Disabled - made things worse
+// pub mod odgi_topological_sort_hashgraph;  // Disabled - made things worse
 pub mod cigar_analysis;
 pub mod embedded_builder;
 pub mod embedded_graph;
@@ -188,6 +190,7 @@ mod tests {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         run_seqrush(args).unwrap();

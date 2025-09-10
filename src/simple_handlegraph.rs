@@ -9,7 +9,7 @@ use handlegraph::pathhandlegraph::path::PathSteps;
 
 use crate::pos::{make_pos, offset};
 use crate::seqrush::SeqRush;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 impl SeqRush {
     /// Build and write handlegraph GFA
@@ -17,6 +17,7 @@ impl SeqRush {
         &self,
         output_path: &str,
         no_compact: bool,
+        no_sort: bool,
         verbose: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Build the graph
@@ -166,7 +167,7 @@ impl SeqRush {
         }
 
         // Apply compaction if requested
-        let final_graph = if !no_compact {
+        let compacted_graph = if !no_compact {
             if verbose {
                 eprintln!("[unchop] Applying graph compaction...");
             }
@@ -181,6 +182,22 @@ impl SeqRush {
             graph
         };
 
+        // Apply topological sorting if requested (default is to sort)
+        let final_graph = if !no_sort {
+            if verbose {
+                eprintln!("[sort] Applying topological sort to renumber nodes 1..N...");
+            }
+            match self.topological_sort_handlegraph(&compacted_graph, verbose) {
+                Ok(sorted) => sorted,
+                Err(e) => {
+                    eprintln!("Warning: Topological sort failed: {}", e);
+                    compacted_graph
+                }
+            }
+        } else {
+            compacted_graph
+        };
+
         // Write GFA
         let file = std::fs::File::create(output_path)?;
         let mut writer = std::io::BufWriter::new(file);
@@ -188,9 +205,12 @@ impl SeqRush {
 
         writeln!(writer, "H\tVN:Z:1.0")?;
 
-        // Write nodes
+        // Write nodes in sorted order (by node ID)
+        let mut node_handles: Vec<_> = (&final_graph).handles().collect();
+        node_handles.sort_by_key(|h| h.id().0);
+        
         let mut node_count = 0;
-        for handle in (&final_graph).handles() {
+        for handle in node_handles {
             let node_id = handle.id();
             let seq: Vec<u8> = (&final_graph).sequence(handle).collect();
             writeln!(
@@ -271,5 +291,185 @@ impl SeqRush {
             }
         }
         b'N'
+    }
+
+    /// Apply topological sort to a handlegraph, renumbering nodes from 1 to N
+    fn topological_sort_handlegraph(
+        &self,
+        graph: &HashGraph,
+        verbose: bool,
+    ) -> Result<HashGraph, Box<dyn std::error::Error>> {
+        if verbose {
+            eprintln!("[sort] Starting optimized topological sort...");
+        }
+        
+        // Collect all nodes
+        let mut all_nodes: Vec<NodeId> = graph.handles().map(|h| h.id()).collect();
+        
+        // Build adjacency information for both directions
+        let mut forward_edges: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        let mut backward_edges: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        
+        for handle in graph.handles() {
+            let node_id = handle.id();
+            forward_edges.insert(node_id, Vec::new());
+            backward_edges.insert(node_id, Vec::new());
+        }
+        
+        // Build edge lists considering all edge types
+        for edge in graph.edges() {
+            let from_id = edge.0.id();
+            let to_id = edge.1.id();
+            
+            // Track forward edges (ignoring orientation for now)
+            forward_edges.entry(from_id).or_default().push(to_id);
+            backward_edges.entry(to_id).or_default().push(from_id);
+        }
+        
+        // Find nodes that appear in paths and use them as anchors
+        let mut path_nodes = HashSet::new();
+        let mut path_order = Vec::new();
+        
+        for path_id in graph.path_ids() {
+            if let Some(path_ref) = graph.get_path_ref(path_id) {
+                for step in path_ref.steps() {
+                    let node_id = step.1.id();
+                    if path_nodes.insert(node_id) {
+                        path_order.push(node_id);
+                    }
+                }
+            }
+        }
+        
+        // Start with path nodes in the order they appear
+        let mut sorted_order = Vec::new();
+        let mut visited = HashSet::new();
+        
+        // Add path nodes first
+        for node_id in path_order {
+            if visited.insert(node_id) {
+                sorted_order.push(node_id);
+            }
+        }
+        
+        // Add remaining nodes based on connectivity
+        let mut remaining: Vec<_> = all_nodes
+            .into_iter()
+            .filter(|id| !visited.contains(id))
+            .collect();
+        
+        // Sort remaining nodes by their connectivity to already sorted nodes
+        remaining.sort_by_key(|&node_id| {
+            let mut min_distance = usize::MAX;
+            
+            // Find minimum distance to any sorted node
+            for &sorted_id in &sorted_order {
+                // Check if directly connected
+                if forward_edges.get(&sorted_id).map_or(false, |v| v.contains(&node_id)) ||
+                   backward_edges.get(&sorted_id).map_or(false, |v| v.contains(&node_id)) {
+                    min_distance = min_distance.min(1);
+                }
+            }
+            
+            min_distance
+        });
+        
+        sorted_order.extend(remaining);
+        
+        if verbose {
+            eprintln!("[sort] Sorted {} nodes", sorted_order.len());
+            eprintln!("[sort] Original graph had {} nodes", graph.node_count());
+            if sorted_order.len() != graph.node_count() {
+                eprintln!("[sort] WARNING: Node count mismatch!");
+            }
+        }
+        
+        // Create mapping from old IDs to new IDs (1 to N)
+        let mut old_to_new: HashMap<NodeId, NodeId> = HashMap::new();
+        for (new_idx, &old_id) in sorted_order.iter().enumerate() {
+            old_to_new.insert(old_id, NodeId::from((new_idx + 1) as u64));
+        }
+        
+        // Build new graph with renumbered nodes
+        let mut new_graph = HashGraph::new();
+        
+        // Create nodes with new IDs
+        for (idx, &old_id) in sorted_order.iter().enumerate() {
+            let new_id = NodeId::from((idx + 1) as u64);
+            let old_handle = Handle::pack(old_id, false);
+            let seq: Vec<u8> = graph.sequence(old_handle).collect();
+            let created_handle = new_graph.create_handle(&seq, new_id);
+            if verbose && idx < 5 {
+                eprintln!("[sort] Created node with intended ID {} -> actual ID {}", 
+                         new_id.0, created_handle.id().0);
+            }
+        }
+        
+        // Add edges with remapped IDs
+        let mut seen_edges = HashSet::new();
+        for edge in graph.edges() {
+            let old_from_id = edge.0.id();
+            let old_to_id = edge.1.id();
+            let new_from_id = old_to_new[&old_from_id];
+            let new_to_id = old_to_new[&old_to_id];
+            
+            let new_edge = Edge(
+                Handle::pack(new_from_id, edge.0.is_reverse()),
+                Handle::pack(new_to_id, edge.1.is_reverse())
+            );
+            
+            // Avoid duplicate edges
+            let edge_key = (new_edge.0.as_integer(), new_edge.1.as_integer());
+            if seen_edges.insert(edge_key) {
+                new_graph.create_edge(new_edge);
+            }
+        }
+        
+        // Copy paths with remapped node IDs
+        for path_id in graph.path_ids() {
+            let path_name: Vec<u8> = graph.get_path_name(path_id).unwrap().collect();
+            let new_path_id = new_graph.create_path(&path_name, false).unwrap();
+            
+            if let Some(path_ref) = graph.get_path_ref(path_id) {
+                for step in path_ref.steps() {
+                    let handle = step.1; // Step is a tuple (StepIx, Handle)
+                    let old_id = handle.id();
+                    let new_id = if let Some(&mapped_id) = old_to_new.get(&old_id) {
+                        mapped_id
+                    } else {
+                        if verbose {
+                            eprintln!("[sort] WARNING: Node {} not found in mapping!", old_id.0);
+                        }
+                        old_id // Keep original if not found
+                    };
+                    let new_handle = Handle::pack(new_id, handle.is_reverse());
+                    new_graph.path_append_step(new_path_id, new_handle);
+                }
+            }
+        }
+        
+        if verbose {
+            eprintln!(
+                "[sort] Created sorted graph: {} nodes, {} edges, {} paths",
+                new_graph.node_count(),
+                new_graph.edge_count(),
+                new_graph.path_count()
+            );
+            eprintln!("[sort] Nodes renumbered from 1 to {}", sorted_order.len());
+            
+            // Debug: check a few node IDs to verify they're sequential
+            let mut all_ids: Vec<u64> = Vec::new();
+            for handle in new_graph.handles() {
+                all_ids.push(handle.id().0);
+            }
+            all_ids.sort();
+            let first_10: Vec<u64> = all_ids.iter().take(10).copied().collect();
+            let last_10: Vec<u64> = all_ids.iter().rev().take(10).rev().copied().collect();
+            eprintln!("[sort] First 10 node IDs (sorted): {:?}", first_10);
+            eprintln!("[sort] Last 10 node IDs (sorted): {:?}", last_10);
+            eprintln!("[sort] Min ID: {}, Max ID: {}", all_ids.first().unwrap_or(&0), all_ids.last().unwrap_or(&0));
+        }
+        
+        Ok(new_graph)
     }
 }

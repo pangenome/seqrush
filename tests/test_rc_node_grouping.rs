@@ -30,6 +30,7 @@ fn test_rc_sequences_share_nodes() {
         validate_paf: false,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     let output_path = args.output.clone();
@@ -106,6 +107,7 @@ fn test_node_sequence_consistency() {
         validate_paf: false,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     let output_path = args.output.clone();

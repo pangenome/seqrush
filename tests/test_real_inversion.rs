@@ -41,6 +41,7 @@ fn test_real_inversion_case() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     println!("Testing real inversion case...");
@@ -83,6 +84,7 @@ fn test_larger_inversion_with_unique_content() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     println!("\nTesting larger inversion with unique content...");
@@ -124,6 +126,7 @@ fn test_inversion_with_snps() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     println!("\nTesting inversion detection with SNPs...");

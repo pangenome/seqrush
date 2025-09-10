@@ -1,0 +1,14 @@
+[package]
+name = "lcs-diff"
+version = "0.1.1"
+authors = ["bokuweb <bokuweb12@gmail.com>"]
+repository = "https://github.com/bokuweb/lcs-diff-rs"
+keywords = ["diff", "lcs"]
+license = "MIT"
+readme = "README.md"
+description = "Compute differences between two slices using LCS algorithm."
+
+[dependencies]
+
+[dev-dependencies]
+speculate = "0.0.25"

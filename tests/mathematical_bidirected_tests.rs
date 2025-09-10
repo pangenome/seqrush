@@ -90,6 +90,7 @@ fn test_base_case_empty() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -138,6 +139,7 @@ fn test_base_case_single_base() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -233,6 +235,7 @@ fn test_identical_sequences_share_nodes() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -282,6 +285,7 @@ fn test_inductive_sequence_extension() {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
+        no_sort: false,
         };
 
         run_seqrush_bidirected_simple(args).unwrap();
@@ -375,6 +379,7 @@ fn test_path_reconstruction_correctness() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -429,6 +434,7 @@ fn test_edge_connectivity() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -482,6 +488,7 @@ fn test_palindromic_sequences() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -522,6 +529,7 @@ fn test_union_find_with_matches() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -574,6 +582,7 @@ fn test_large_sequences() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -615,6 +624,7 @@ fn test_transitivity_of_matches() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

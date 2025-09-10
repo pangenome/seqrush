@@ -1,0 +1,18 @@
+[package]
+name = "uf_rush"
+authors = ["Kambiz Khojasteh"]
+description = "A lock-free, thread-safe implementation of the Union-Find (Disjoint-Set) data structure."
+keywords = ["union-find", "disjoint-sets", "lock-free", "thread-safe"]
+categories = ["data-structures", "algorithms", "concurrency"]
+version = "0.2.1"
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/khojasteh/uf_rush"
+documentation = "https://docs.rs/uf_rush/0.2.1"
+
+[dev-dependencies]
+rand = "0.8"
+
+[profile.test]
+opt-level = 3

@@ -80,6 +80,10 @@ pub struct Args {
     /// Use seqwish-style builder (experimental toggle used in tests)
     #[arg(long = "seqwish-style", default_value = "false", hide = true)]
     pub seqwish_style: bool,
+
+    /// Disable topological sorting of nodes (sorting is enabled by default)
+    #[arg(long = "no-sort", default_value = "false")]
+    pub no_sort: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -903,7 +907,7 @@ impl SeqRush {
         let _test_mode = args.test_mode;
 
         // Always use handlegraph implementation
-        self.write_handlegraph_gfa(output_path, args.no_compact, verbose)
+        self.write_handlegraph_gfa(output_path, args.no_compact, args.no_sort, verbose)
     }
 
     fn build_initial_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {

@@ -57,6 +57,7 @@ fn test_simple_forward_sequence() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -97,6 +98,7 @@ fn test_reverse_complement_alignment() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -140,6 +142,7 @@ fn test_palindromic_sequence() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -177,6 +180,7 @@ fn test_inversion_between_sequences() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -224,6 +228,7 @@ fn test_complex_rearrangement() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -259,6 +264,7 @@ fn test_self_alignment_with_repeats() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -331,6 +337,7 @@ fn test_multiple_sequence_alignment() {
         validate_paf: true,
         paf: None,
         seqwish_style: false,
+        no_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

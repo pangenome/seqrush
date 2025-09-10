@@ -1,6 +1,5 @@
 use crate::bidirected_graph::{BiEdge, BiNode, BiPath, Handle};
 use crate::graph_ops::{Edge, Graph, Node};
-use bitvec::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// A bidirected graph that extends the basic Graph with orientation support
@@ -491,237 +490,217 @@ impl BidirectedGraph {
     }
 
     /// Perform bidirected topological sort using modified Kahn's algorithm
-    /// This handles cycles and bidirected edges properly
+    /// This is a direct port of the odgi topological_order algorithm
     pub fn topological_sort(
         &mut self,
         use_heads: bool,
         use_tails: bool,
         verbose: bool,
     ) -> Vec<Handle> {
-        let mut ordering = Vec::new();
-        let num_nodes = self.nodes.len();
-
-        if num_nodes == 0 {
-            return ordering;
+        let mut sorted = Vec::new();
+        
+        if self.nodes.is_empty() {
+            return sorted;
         }
 
-        // Create handle set for all possible orientations
-        let mut all_handles = BTreeSet::new();
-        for &node_id in self.nodes.keys() {
-            all_handles.insert(Handle::forward(node_id));
-            all_handles.insert(Handle::reverse(node_id));
-        }
-
-        // Track visited handles and potential seeds for cycle breaking
-        let mut visited: BitVec<u64, Lsb0> = BitVec::repeat(false, all_handles.len());
-        let mut seeds: BitVec<u64, Lsb0> = BitVec::repeat(false, all_handles.len());
-
-        // Create handle to index mapping
+        // Create mapping of all possible handles (both orientations for each node)
         let mut handle_to_idx = HashMap::new();
-        for (idx, &handle) in all_handles.iter().enumerate() {
-            handle_to_idx.insert(handle, idx);
+        let mut idx_to_handle = Vec::new();
+        let mut idx = 0;
+        
+        // Collect all node IDs in sorted order for deterministic behavior
+        let mut node_ids: Vec<_> = self.nodes.keys().copied().collect();
+        node_ids.sort();
+        
+        for node_id in &node_ids {
+            // Forward orientation
+            let fwd = Handle::forward(*node_id);
+            handle_to_idx.insert(fwd, idx);
+            idx_to_handle.push(fwd);
+            idx += 1;
+            
+            // Reverse orientation
+            let rev = Handle::reverse(*node_id);
+            handle_to_idx.insert(rev, idx);
+            idx_to_handle.push(rev);
+            idx += 1;
         }
-
-        // Build edge index for efficient queries
-        let mut edges_by_from: HashMap<Handle, Vec<(Handle, usize)>> = HashMap::new();
-        let mut edges_by_to: HashMap<Handle, Vec<(Handle, usize)>> = HashMap::new();
-        let mut edge_list = Vec::new();
-
-        for (edge_idx, edge) in self.edges.iter().enumerate() {
-            edge_list.push(*edge);
-
-            // Direct edge: from → to
-            edges_by_from
-                .entry(edge.from)
-                .or_default()
-                .push((edge.to, edge_idx));
-            edges_by_to
-                .entry(edge.to)
-                .or_default()
-                .push((edge.from, edge_idx));
-
-            // Implied reverse edge: to.flip() → from.flip()
-            edges_by_from
-                .entry(edge.to.flip())
-                .or_default()
-                .push((edge.from.flip(), edge_idx));
-            edges_by_to
-                .entry(edge.from.flip())
-                .or_default()
-                .push((edge.to.flip(), edge_idx));
-        }
-
-        // Track masked edges (simulating edge removal without modifying graph)
-        let mut masked_edges: BitVec<u64, Lsb0> = BitVec::repeat(false, edge_list.len());
-
-        // Count unmasked in-edges for each handle
-        let mut in_degree: HashMap<Handle, usize> = HashMap::new();
-        for &handle in &all_handles {
-            in_degree.insert(handle, 0);
-        }
-
-        for edge in &self.edges {
-            // Direct edge: from → to
-            *in_degree.get_mut(&edge.to).unwrap() += 1;
-            // Implied reverse edge: to.flip() → from.flip()
-            *in_degree.get_mut(&edge.from.flip()).unwrap() += 1;
-        }
-
-        // Initialize queue with appropriate seeds
-        let mut queue = VecDeque::new();
-
-        // Function to add seeds based on criteria
-        let add_seeds = |queue: &mut VecDeque<Handle>,
-                         in_degree: &HashMap<Handle, usize>,
-                         visited: &BitVec<u64, Lsb0>,
-                         handle_to_idx: &HashMap<Handle, usize>,
-                         use_heads: bool,
-                         use_tails: bool| {
-            // Add head nodes (no incoming edges)
-            if use_heads {
-                for &handle in &all_handles {
-                    let idx = handle_to_idx[&handle];
-                    if !visited[idx] && in_degree[&handle] == 0 {
-                        queue.push_back(handle);
-                    }
-                }
-            }
-
-            // Add tail nodes (no outgoing edges)
-            if use_tails && queue.is_empty() {
-                for &handle in &all_handles {
-                    let idx = handle_to_idx[&handle];
-                    if !visited[idx]
-                        && edges_by_from
-                            .get(&handle)
-                            .map(|v| v.is_empty())
-                            .unwrap_or(true)
-                    {
-                        queue.push_back(handle);
-                    }
-                }
-            }
-        };
-
-        // Start with initial seeds - but prioritize forward orientations
-        add_seeds(
-            &mut queue,
-            &in_degree,
-            &visited,
-            &handle_to_idx,
-            use_heads,
-            use_tails,
-        );
-
-        // Sort queue to prioritize forward orientations
-        let mut queue_vec: Vec<_> = queue.drain(..).collect();
-        queue_vec.sort_by_key(|h| (h.is_reverse(), h.node_id()));
-        queue.extend(queue_vec);
-
-        // Main topological sort loop
-        while ordering.len() < all_handles.len() {
-            // If queue is empty, we need to break a cycle
-            if queue.is_empty() {
-                // Try seeds collected during traversal (good cycle entry points)
-                let mut found_seed = false;
-                for &handle in &all_handles {
-                    let idx = handle_to_idx[&handle];
-                    if seeds[idx] && !visited[idx] {
-                        queue.push_back(handle);
-                        seeds.set(idx, false);
-                        found_seed = true;
+        
+        let total_handles = idx_to_handle.len();
+        
+        // S - set of handles ready to be processed
+        let mut s = HashSet::new();
+        
+        // Track which handles have been visited
+        let mut visited = vec![false; total_handles];
+        
+        // Seeds for cycle breaking
+        let mut seeds = HashMap::new();
+        
+        // Track masked edges (simulating edge removal)
+        let mut masked_edges = HashSet::new();
+        
+        // Find head and tail nodes if requested
+        if use_heads {
+            for &node_id in &node_ids {
+                let handle = Handle::forward(node_id);
+                // Check if this node has any incoming edges on its left side
+                let mut has_left_edges = false;
+                
+                // Check all edges where this node is the target
+                for edge in &self.edges {
+                    if edge.to.node_id() == node_id && !edge.to.is_reverse() {
+                        // Edge comes to forward orientation (left side)
+                        has_left_edges = true;
                         break;
                     }
-                }
-
-                // If no seeds, pick any unvisited node
-                if !found_seed {
-                    for &handle in &all_handles {
-                        let idx = handle_to_idx[&handle];
-                        if !visited[idx] {
-                            queue.push_back(handle);
-                            if verbose {
-                                println!("Breaking cycle at handle {}", handle);
-                            }
+                    if edge.to.node_id() == node_id && edge.to.is_reverse() {
+                        // Edge comes to reverse orientation (which is right side of forward)
+                        continue;
+                    }
+                    // Also check edges from this node going backward (self loops)
+                    if edge.from.node_id() == node_id && edge.from.is_reverse() {
+                        if edge.to.node_id() == node_id && !edge.to.is_reverse() {
+                            has_left_edges = true;
                             break;
                         }
                     }
                 }
-
-                // If still empty, we're done
-                if queue.is_empty() {
-                    break;
+                
+                if !has_left_edges {
+                    s.insert(handle);
                 }
             }
-
-            // Process next handle
-            let handle = queue.pop_front().unwrap();
-            let idx = handle_to_idx[&handle];
-
-            // Skip if already visited
-            if visited[idx] {
-                continue;
-            }
-
-            // Mark as visited and add to ordering
-            visited.set(idx, true);
-            ordering.push(handle);
-
-            // Process outgoing edges
-            if let Some(out_edges) = edges_by_from.get(&handle) {
-                for &(to_handle, edge_idx) in out_edges {
-                    // Skip if edge is masked
-                    if masked_edges[edge_idx] {
-                        continue;
+        } else if use_tails {
+            for &node_id in &node_ids {
+                let handle = Handle::forward(node_id);
+                // Check if this node has any outgoing edges on its right side
+                let mut has_right_edges = false;
+                
+                for edge in &self.edges {
+                    if edge.from.node_id() == node_id && !edge.from.is_reverse() {
+                        // Edge goes from forward orientation (right side)
+                        has_right_edges = true;
+                        break;
                     }
-
-                    // Mask this edge
-                    masked_edges.set(edge_idx, true);
-
-                    // Update in-degree of target
-                    if let Some(degree) = in_degree.get_mut(&to_handle) {
-                        if *degree > 0 {
-                            *degree -= 1;
-
-                            // If in-degree becomes 0, add to queue
-                            if *degree == 0 {
-                                let to_idx = handle_to_idx[&to_handle];
-                                if !visited[to_idx] {
-                                    queue.push_back(to_handle);
-                                }
+                }
+                
+                if !has_right_edges {
+                    s.insert(handle);
+                }
+            }
+        }
+        
+        // Main topological sort loop
+        while visited.iter().filter(|&&v| v).count() < self.nodes.len() || !s.is_empty() {
+            // If S is empty, we need to find a new seed
+            if s.is_empty() {
+                // First try seeds collected during traversal
+                let mut found_seed = false;
+                for (&handle, &_) in &seeds {
+                    let idx = handle_to_idx[&handle];
+                    if !visited[idx] {
+                        s.insert(handle);
+                        found_seed = true;
+                        break;
+                    }
+                }
+                
+                // If no seeds, pick any unvisited node (lowest ID for determinism)
+                if !found_seed {
+                    for &handle in &idx_to_handle {
+                        let idx = handle_to_idx[&handle];
+                        if !visited[idx] && !handle.is_reverse() {
+                            // Prefer forward orientation
+                            s.insert(handle);
+                            found_seed = true;
+                            break;
+                        }
+                    }
+                    
+                    // If still nothing, try reverse orientations
+                    if !found_seed {
+                        for &handle in &idx_to_handle {
+                            let idx = handle_to_idx[&handle];
+                            if !visited[idx] {
+                                s.insert(handle);
+                                break;
                             }
                         }
                     }
-
-                    // If target still has incoming edges but we've seen it,
-                    // mark it as a potential seed for cycle breaking
-                    let to_idx = handle_to_idx[&to_handle];
-                    if !visited[to_idx] && in_degree[&to_handle] > 0 {
-                        seeds.set(to_idx, true);
+                }
+            }
+            
+            // Process handles in S
+            while !s.is_empty() {
+                // Get a handle from S (use minimum for determinism)
+                let handle = *s.iter().min().unwrap();
+                s.remove(&handle);
+                
+                let idx = handle_to_idx[&handle];
+                if visited[idx] {
+                    continue;
+                }
+                
+                // Mark as visited and add to sorted order
+                visited[idx] = true;
+                // Only add forward orientations to final result
+                if !handle.is_reverse() {
+                    sorted.push(handle);
+                }
+                
+                // Look at edges from the left side of this handle
+                for edge in self.edges.clone() {
+                    // Check edges coming into this handle from the left
+                    if edge.to == handle && !masked_edges.contains(&edge) {
+                        // Mask this edge
+                        masked_edges.insert(edge);
+                        
+                        // The source of this edge might have been a cycle entry point
+                        // No need to process further for left edges
+                    }
+                }
+                
+                // Look at edges from the right side of this handle
+                let edges_to_check: Vec<_> = self.edges.iter().cloned().collect();
+                for edge in edges_to_check {
+                    if edge.from == handle && !masked_edges.contains(&edge) {
+                        // Mask this edge
+                        masked_edges.insert(edge);
+                        
+                        let next_handle = edge.to;
+                        let next_idx = *handle_to_idx.get(&next_handle).unwrap_or(&total_handles);
+                        
+                        if next_idx < total_handles && !visited[next_idx] {
+                            // Check if this handle has any other unmasked incoming edges
+                            let mut has_unmasked_incoming = false;
+                            for other_edge in &self.edges {
+                                if other_edge.to == next_handle && 
+                                   !masked_edges.contains(other_edge) &&
+                                   other_edge != &edge {
+                                    has_unmasked_incoming = true;
+                                    break;
+                                }
+                            }
+                            
+                            if !has_unmasked_incoming {
+                                // No more incoming edges, add to S
+                                s.insert(next_handle);
+                            } else {
+                                // Still has incoming edges, mark as potential seed
+                                seeds.insert(next_handle, true);
+                            }
+                        }
                     }
                 }
             }
         }
-
-        // Filter ordering to only include forward orientations of nodes that exist
-        let mut node_ordering = Vec::new();
-        let mut seen_nodes = HashSet::new();
-
-        for handle in ordering {
-            let node_id = handle.node_id();
-            if self.nodes.contains_key(&node_id) && seen_nodes.insert(node_id) {
-                node_ordering.push(Handle::forward(node_id));
-            }
-        }
-
+        
         if verbose {
-            println!(
-                "Topological sort completed: {} nodes ordered",
-                node_ordering.len()
-            );
+            println!("Topological sort completed: {} nodes ordered", sorted.len());
         }
-
-        node_ordering
+        
+        sorted
     }
 
     /// Apply a node ordering to renumber the graph
