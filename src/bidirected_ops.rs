@@ -18,13 +18,29 @@ impl Default for BidirectedGraph {
 impl BidirectedGraph {
     /// Compact the graph by merging linear chains of nodes
     pub fn compact(&mut self) {
-        // Find simple components (linear chains)
-        let components = self.find_simple_components();
-
-        // Merge each component
-        for component in components {
-            if component.len() >= 2 {
-                self.merge_component(&component);
+        let mut compacted = true;
+        let mut iteration = 0;
+        
+        // Keep compacting until no more changes
+        while compacted {
+            compacted = false;
+            iteration += 1;
+            
+            // Find simple components (linear chains)
+            let components = self.find_simple_components();
+            
+            // Merge each component
+            for component in components {
+                if component.len() >= 2 {
+                    eprintln!("Compaction iteration {}: merging chain of {} nodes", iteration, component.len());
+                    if self.merge_component_v2(&component) {
+                        compacted = true;
+                    }
+                }
+            }
+            
+            if !compacted {
+                break;
             }
         }
     }
@@ -58,8 +74,9 @@ impl BidirectedGraph {
 
         // Check if two handles are perfect neighbors (can be merged)
         let are_perfect_neighbors = |from: Handle, to: Handle| -> bool {
-            // Check all paths
+            // Check all paths for both forward and reverse consistency
             for path in &self.paths {
+                // Check forward direction: from -> to
                 let mut from_to_transitions = 0;
                 let mut from_visits = 0;
 
@@ -82,6 +99,34 @@ impl BidirectedGraph {
 
                 // If we visited 'from' but didn't always go to 'to', not perfect
                 if from_visits > 0 && from_visits != from_to_transitions {
+                    return false;
+                }
+                
+                // Also check reverse: to.flip() -> from.flip()
+                // This ensures bidirected consistency
+                let from_rev = from.flip();
+                let to_rev = to.flip();
+                let mut to_rev_visits = 0;
+                let mut to_rev_to_from_rev = 0;
+                
+                for i in 0..path.steps.len() {
+                    if path.steps[i] == to_rev {
+                        to_rev_visits += 1;
+                        if i + 1 < path.steps.len() {
+                            if path.steps[i + 1] == from_rev {
+                                to_rev_to_from_rev += 1;
+                            } else {
+                                // Reverse path doesn't maintain the chain
+                                return false;
+                            }
+                        } else {
+                            // Path ends at to_rev
+                            return false;
+                        }
+                    }
+                }
+                
+                if to_rev_visits > 0 && to_rev_visits != to_rev_to_from_rev {
                     return false;
                 }
             }
@@ -160,11 +205,266 @@ impl BidirectedGraph {
 
         components
     }
+    
+    /// Merge a component (chain of handles) into a single node - Version 2
+    /// Returns true if the merge was successful
+    fn merge_component_v2(&mut self, handles: &[Handle]) -> bool {
+        if handles.len() < 2 {
+            return false;
+        }
+        
+        // First, build a complete mapping of what needs to be replaced
+        // This includes both the handles in the chain and their flipped versions
+        let mut handle_mapping = std::collections::HashMap::new();
+        
+        // Create new sequence by concatenating
+        let mut new_sequence = Vec::new();
+        for &handle in handles {
+            if let Some(node) = self.nodes.get(&handle.node_id()) {
+                if handle.is_reverse() {
+                    new_sequence.extend(crate::bidirected_graph::reverse_complement(&node.sequence));
+                } else {
+                    new_sequence.extend(&node.sequence);
+                }
+            }
+        }
+        
+        // Create new node
+        let new_node_id = self.next_node_id();
+        let new_handle_forward = Handle::forward(new_node_id);
+        let new_handle_reverse = Handle::reverse(new_node_id);
+        
+        // Build complete handle mapping
+        // Map each handle in the chain to its position in the new node
+        for (i, &handle) in handles.iter().enumerate() {
+            // The forward chain maps to forward new node
+            handle_mapping.insert(handle, (new_handle_forward, i, false));
+            // The reverse of each handle maps to reverse position
+            let rev_handle = handle.flip();
+            let rev_position = handles.len() - 1 - i;
+            handle_mapping.insert(rev_handle, (new_handle_reverse, rev_position, true));
+        }
+        
+        // Validate that paths can be properly updated
+        for path in &self.paths {
+            let mut i = 0;
+            while i < path.steps.len() {
+                if let Some((_, chain_pos, _)) = handle_mapping.get(&path.steps[i]) {
+                    // Found a handle from our chain
+                    // Check if it's the start of the complete forward chain
+                    if *chain_pos == 0 {
+                        // Check if the complete chain follows
+                        let mut chain_complete = true;
+                        if i + handles.len() <= path.steps.len() {
+                            for j in 0..handles.len() {
+                                if path.steps[i + j] != handles[j] {
+                                    chain_complete = false;
+                                    break;
+                                }
+                            }
+                            if chain_complete {
+                                i += handles.len();
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    // Check if it's the start of the complete reverse chain
+                    let rev_chain: Vec<Handle> = handles.iter().rev().map(|h| h.flip()).collect();
+                    if path.steps[i] == rev_chain[0] {
+                        let mut chain_complete = true;
+                        if i + rev_chain.len() <= path.steps.len() {
+                            for j in 0..rev_chain.len() {
+                                if path.steps[i + j] != rev_chain[j] {
+                                    chain_complete = false;
+                                    break;
+                                }
+                            }
+                            if chain_complete {
+                                i += rev_chain.len();
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    // If we get here, the handle appears but not as part of a complete chain
+                    eprintln!("Cannot compact: handle {} appears individually in path {}", path.steps[i], path.name);
+                    return false;
+                }
+                i += 1;
+            }
+        }
+        
+        // All paths validated - proceed with the merge
+        self.add_node(new_node_id, new_sequence);
+        
+        // Update all paths
+        for path in &mut self.paths {
+            let mut new_steps = Vec::new();
+            let mut i = 0;
+            
+            while i < path.steps.len() {
+                // Check for forward chain
+                if i + handles.len() <= path.steps.len() {
+                    let mut is_forward_chain = true;
+                    for j in 0..handles.len() {
+                        if path.steps[i + j] != handles[j] {
+                            is_forward_chain = false;
+                            break;
+                        }
+                    }
+                    if is_forward_chain {
+                        new_steps.push(new_handle_forward);
+                        i += handles.len();
+                        continue;
+                    }
+                }
+                
+                // Check for reverse chain
+                let rev_chain: Vec<Handle> = handles.iter().rev().map(|h| h.flip()).collect();
+                if i + rev_chain.len() <= path.steps.len() {
+                    let mut is_reverse_chain = true;
+                    for j in 0..rev_chain.len() {
+                        if path.steps[i + j] != rev_chain[j] {
+                            is_reverse_chain = false;
+                            break;
+                        }
+                    }
+                    if is_reverse_chain {
+                        new_steps.push(new_handle_reverse);
+                        i += rev_chain.len();
+                        continue;
+                    }
+                }
+                
+                // Not part of a chain, keep as is
+                new_steps.push(path.steps[i]);
+                i += 1;
+            }
+            
+            path.steps = new_steps;
+        }
+        
+        // Update edges
+        let first_handle = handles[0];
+        let last_handle = handles[handles.len() - 1];
+        
+        // Find edges that connect to the chain
+        let mut new_edges = std::collections::HashSet::new();
+        for edge in &self.edges {
+            let mut skip = false;
+            
+            // Check if this edge is internal to the chain
+            for &h in handles {
+                if edge.from.node_id() == h.node_id() || edge.to.node_id() == h.node_id() {
+                    skip = true;
+                    break;
+                }
+            }
+            
+            if !skip {
+                new_edges.insert(edge.clone());
+            }
+        }
+        
+        // Add edges from predecessors to the new node
+        for edge in &self.edges {
+            if edge.to == first_handle {
+                new_edges.insert(BiEdge {
+                    from: edge.from,
+                    to: new_handle_forward,
+                });
+            }
+            // Handle reverse orientation
+            let last_rev = last_handle.flip();
+            if edge.from == last_rev {
+                new_edges.insert(BiEdge {
+                    from: new_handle_reverse,
+                    to: edge.to,
+                });
+            }
+        }
+        
+        // Add edges from the new node to successors
+        for edge in &self.edges {
+            if edge.from == last_handle {
+                new_edges.insert(BiEdge {
+                    from: new_handle_forward,
+                    to: edge.to,
+                });
+            }
+            // Handle reverse orientation
+            let first_rev = first_handle.flip();
+            if edge.to == first_rev {
+                new_edges.insert(BiEdge {
+                    from: edge.from,
+                    to: new_handle_reverse,
+                });
+            }
+        }
+        
+        self.edges = new_edges;
+        
+        // Remove old nodes
+        for &handle in handles {
+            self.nodes.remove(&handle.node_id());
+        }
+        
+        true
+    }
 
     /// Merge a component (chain of handles) into a single node
     fn merge_component(&mut self, handles: &[Handle]) {
         if handles.len() < 2 {
             return;
+        }
+
+        // First, validate that this chain can be safely compacted
+        // Check that all occurrences of chain nodes appear as the complete chain
+        for path in &self.paths {
+            let mut i = 0;
+            while i < path.steps.len() {
+                let current_handle = path.steps[i];
+                
+                // Check if this handle is in our chain
+                if handles.contains(&current_handle) {
+                    // Found a handle from the chain - verify the entire chain is here
+                    let chain_position = handles.iter().position(|&h| h == current_handle);
+                    if let Some(pos) = chain_position {
+                        // Check if we have the complete chain starting from the beginning
+                        if pos == 0 {
+                            // Check if the entire chain follows
+                            let mut chain_complete = true;
+                            if i + handles.len() <= path.steps.len() {
+                                for j in 0..handles.len() {
+                                    if path.steps[i + j] != handles[j] {
+                                        chain_complete = false;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                chain_complete = false;
+                            }
+                            
+                            if chain_complete {
+                                // Good, skip the entire chain
+                                i += handles.len();
+                                continue;
+                            }
+                        }
+                        
+                        // If we get here, the chain node appears but not as part of the complete chain
+                        eprintln!(
+                            "WARNING: Cannot compact chain {:?} - node {} appears individually in path {}",
+                            handles.iter().map(|h| h.node_id()).collect::<Vec<_>>(),
+                            current_handle.node_id(),
+                            path.name
+                        );
+                        return;  // Abort this compaction
+                    }
+                }
+                i += 1;
+            }
         }
 
         // Create new sequence by concatenating
@@ -241,7 +541,7 @@ impl BidirectedGraph {
             }
         }
 
-        // Update paths
+        // Update paths - we've already validated that all chain nodes appear as complete chains
         for path in &mut self.paths {
             let mut new_steps = Vec::new();
             let mut i = 0;
@@ -249,36 +549,39 @@ impl BidirectedGraph {
             while i < path.steps.len() {
                 let current_handle = path.steps[i];
 
-                // Check if this handle is in our chain
-                if let Some(&new_handle) = handle_map.get(&current_handle) {
-                    // This handle is being replaced
-                    // Check if we're at the start of the complete chain
-                    let mut is_chain_start = true;
+                // Check if this is the start of our chain
+                if current_handle == handles[0] {
+                    // Check if the complete chain follows
+                    let mut is_complete_chain = true;
                     if i + handles.len() <= path.steps.len() {
                         for j in 0..handles.len() {
                             if path.steps[i + j] != handles[j] {
-                                is_chain_start = false;
+                                is_complete_chain = false;
                                 break;
                             }
                         }
                     } else {
-                        is_chain_start = false;
+                        is_complete_chain = false;
                     }
 
-                    if is_chain_start {
-                        // We found the complete chain, replace it with the new handle
-                        new_steps.push(new_handle);
+                    if is_complete_chain {
+                        // Replace the entire chain with the new merged handle
+                        let new_handle = handle_map.get(&handles[0]).unwrap();
+                        new_steps.push(*new_handle);
                         i += handles.len();
                     } else {
-                        // This handle is part of the chain but we're not at the chain start
-                        // This shouldn't happen if paths are coherent
-                        eprintln!(
-                            "WARNING: Found handle {} in chain but not at chain start in path {}",
-                            current_handle, path.name
-                        );
+                        // This shouldn't happen after our validation
                         new_steps.push(current_handle);
                         i += 1;
                     }
+                } else if handles.contains(&current_handle) {
+                    // This shouldn't happen - we validated that chain nodes only appear as complete chains
+                    eprintln!(
+                        "ERROR: Unexpected individual occurrence of chain node {} in path {}",
+                        current_handle, path.name
+                    );
+                    new_steps.push(current_handle);
+                    i += 1;
                 } else {
                     // This handle is not in the chain, keep it
                     new_steps.push(current_handle);
@@ -701,6 +1004,256 @@ impl BidirectedGraph {
         }
         
         sorted
+    }
+
+    /// Find all nodes with no edges on their left sides (heads)
+    /// In a bidirected graph, we check for incoming edges to the forward orientation
+    pub fn find_head_nodes(&self) -> Vec<Handle> {
+        let mut heads = Vec::new();
+        
+        for &node_id in self.nodes.keys() {
+            let forward_handle = Handle::forward(node_id);
+            let mut has_incoming = false;
+            
+            // Check if any edge comes TO this handle
+            for edge in &self.edges {
+                if edge.to == forward_handle {
+                    has_incoming = true;
+                    break;
+                }
+            }
+            
+            if !has_incoming {
+                heads.push(forward_handle);
+            }
+        }
+        
+        // Sort for deterministic behavior (ODGI uses ordered containers)
+        heads.sort_by_key(|h| h.node_id());
+        heads
+    }
+    
+    /// Find all nodes with no edges on their right sides (tails)
+    pub fn find_tail_nodes(&self) -> Vec<Handle> {
+        let mut tails = Vec::new();
+        
+        for &node_id in self.nodes.keys() {
+            let forward_handle = Handle::forward(node_id);
+            let mut has_outgoing = false;
+            
+            // Check if any edge goes FROM this handle
+            for edge in &self.edges {
+                if edge.from == forward_handle {
+                    has_outgoing = true;
+                    break;
+                }
+            }
+            
+            if !has_outgoing {
+                tails.push(forward_handle);
+            }
+        }
+        
+        // Sort for deterministic behavior
+        tails.sort_by_key(|h| h.node_id());
+        tails
+    }
+
+    /// Exact ODGI topological_order algorithm
+    /// This is a modified Kahn's algorithm that can handle cycles and bidirected graphs
+    pub fn exact_odgi_topological_order(
+        &self,
+        use_heads: bool,
+        use_tails: bool,
+        verbose: bool,
+    ) -> Vec<Handle> {
+        let mut sorted = Vec::new();
+        
+        if self.nodes.is_empty() {
+            return sorted;
+        }
+        
+        // S - set of oriented handles ready to be processed
+        // Using BTreeSet for deterministic ordering (ODGI behavior)
+        let mut s: BTreeSet<Handle> = BTreeSet::new();
+        
+        // Track which nodes have been visited (not handles, nodes!)
+        let mut visited_nodes = HashSet::new();
+        
+        // Unvisited - track which handles haven't been processed yet
+        let mut unvisited = HashSet::new();
+        for &node_id in self.nodes.keys() {
+            // Both orientations start as unvisited
+            unvisited.insert(Handle::forward(node_id));
+            unvisited.insert(Handle::reverse(node_id));
+        }
+        
+        // Seeds for breaking cycles - ordered for determinism
+        let mut seeds: BTreeSet<Handle> = BTreeSet::new();
+        
+        // Track masked (logically removed) edges
+        let mut masked_edges = HashSet::new();
+        
+        // Initialize with heads or tails if requested
+        if use_heads {
+            for handle in self.find_head_nodes() {
+                if verbose {
+                    eprintln!("[exact_odgi] Starting with head: node {}", handle.node_id());
+                }
+                s.insert(handle);
+                unvisited.remove(&handle);
+                unvisited.remove(&handle.flip());
+            }
+        } else if use_tails {
+            for handle in self.find_tail_nodes() {
+                if verbose {
+                    eprintln!("[exact_odgi] Starting with tail: node {}", handle.node_id());
+                }
+                s.insert(handle);
+                unvisited.remove(&handle);
+                unvisited.remove(&handle.flip());
+            }
+        }
+        
+        // Main loop - continue until all nodes are visited
+        while !unvisited.is_empty() || !s.is_empty() {
+            
+            // If S is empty, need to pick a seed to break into a cycle
+            if s.is_empty() {
+                // First try previously identified seeds
+                let mut found_seed = false;
+                
+                // Process seeds in order
+                let seed_vec: Vec<Handle> = seeds.iter().cloned().collect();
+                for handle in seed_vec {
+                    if unvisited.contains(&handle) {
+                        s.insert(handle);
+                        unvisited.remove(&handle);
+                        unvisited.remove(&handle.flip());
+                        seeds.remove(&handle);
+                        found_seed = true;
+                        if verbose {
+                            eprintln!("[exact_odgi] Using seed: node {} orient {}", 
+                                     handle.node_id(), 
+                                     if handle.is_reverse() { "-" } else { "+" });
+                        }
+                        break;
+                    }
+                }
+                
+                // If no seeds available, pick arbitrary unvisited handle
+                if !found_seed && !unvisited.is_empty() {
+                    // Get minimum unvisited handle for deterministic behavior
+                    let min_handle = unvisited.iter()
+                        .min_by_key(|h| (h.node_id(), h.is_reverse()))
+                        .cloned()
+                        .unwrap();
+                    
+                    s.insert(min_handle);
+                    unvisited.remove(&min_handle);
+                    unvisited.remove(&min_handle.flip());
+                    if verbose {
+                        eprintln!("[exact_odgi] Using arbitrary: node {} orient {}", 
+                                 min_handle.node_id(),
+                                 if min_handle.is_reverse() { "-" } else { "+" });
+                    }
+                }
+            }
+            
+            // Process handles in S
+            while !s.is_empty() {
+                // Get minimum handle for deterministic behavior (BTreeSet maintains order)
+                let handle = *s.iter().next().unwrap();
+                s.remove(&handle);
+                
+                // Emit the node (only once per node, when we see it first)
+                if visited_nodes.insert(handle.node_id()) {
+                    // We emit the forward orientation when we first visit a node
+                    sorted.push(Handle::forward(handle.node_id()));
+                    if verbose {
+                        eprintln!("[exact_odgi] Emitting node {}", handle.node_id());
+                    }
+                }
+                
+                // Look at edges coming into this handle (backward edges)
+                // These are edges that should be "consumed" by placing this handle
+                for edge in &self.edges.clone() {
+                    if edge.to == handle && !masked_edges.contains(edge) {
+                        masked_edges.insert(edge.clone());
+                        if verbose {
+                            eprintln!("[exact_odgi]   Masking incoming edge: {} {} -> {} {}", 
+                                     edge.from.node_id(),
+                                     if edge.from.is_reverse() { "-" } else { "+" },
+                                     edge.to.node_id(),
+                                     if edge.to.is_reverse() { "-" } else { "+" });
+                        }
+                    }
+                }
+                
+                // Look at edges going out from this handle (forward edges)
+                for edge in &self.edges.clone() {
+                    if edge.from == handle && !masked_edges.contains(edge) {
+                        masked_edges.insert(edge.clone());
+                        let next_handle = edge.to;
+                        
+                        if verbose {
+                            eprintln!("[exact_odgi]   Processing outgoing edge: {} {} -> {} {}", 
+                                     edge.from.node_id(),
+                                     if edge.from.is_reverse() { "-" } else { "+" },
+                                     edge.to.node_id(),
+                                     if edge.to.is_reverse() { "-" } else { "+" });
+                        }
+                        
+                        // Only process if not yet visited
+                        if unvisited.contains(&next_handle) {
+                            // Check if next_handle has any other unmasked incoming edges
+                            let mut has_unmasked_incoming = false;
+                            
+                            for other_edge in &self.edges {
+                                if other_edge.to == next_handle && 
+                                   !masked_edges.contains(other_edge) {
+                                    has_unmasked_incoming = true;
+                                    break;
+                                }
+                            }
+                            
+                            if !has_unmasked_incoming {
+                                // No more incoming edges, ready to process
+                                s.insert(next_handle);
+                                unvisited.remove(&next_handle);
+                                unvisited.remove(&next_handle.flip());
+                                if verbose {
+                                    eprintln!("[exact_odgi]     Adding to S: node {} orient {}", 
+                                             next_handle.node_id(),
+                                             if next_handle.is_reverse() { "-" } else { "+" });
+                                }
+                            } else {
+                                // Still has dependencies, mark as potential seed for cycle breaking
+                                seeds.insert(next_handle);
+                                if verbose {
+                                    eprintln!("[exact_odgi]     Marking as seed: node {} orient {}", 
+                                             next_handle.node_id(),
+                                             if next_handle.is_reverse() { "-" } else { "+" });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if verbose {
+            eprintln!("[exact_odgi] Topological sort complete: {} nodes", sorted.len());
+        }
+        
+        sorted
+    }
+    
+    /// Apply the exact ODGI topological ordering to renumber nodes
+    pub fn apply_exact_odgi_ordering(&mut self, verbose: bool) {
+        // Use heads only to match ODGI's default 's' topological sort
+        let ordering = self.exact_odgi_topological_order(true, false, verbose);
+        self.apply_ordering(ordering, verbose);
     }
 
     /// Apply a node ordering to renumber the graph

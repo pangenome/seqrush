@@ -223,7 +223,21 @@ impl SeqRush {
                 self.sequences.iter().map(|s| s.data.len()).sum::<usize>()
             );
         }
+        
+        if verbose {
+            eprintln!("[bidirected_builder] Graph built with {} nodes", graph.nodes.len());
+            let first_10: Vec<usize> = graph.nodes.keys().take(10).cloned().collect();
+            eprintln!("[bidirected_builder] First 10 node IDs: {:?}", first_10);
+            eprintln!("[bidirected_builder] Does graph have node 1? {}", graph.nodes.contains_key(&1));
+            eprintln!("[bidirected_builder] Does graph have node 2? {}", graph.nodes.contains_key(&2));
+        }
 
+        // Apply exact ODGI topological sort by default
+        if verbose {
+            eprintln!("[bidirected_builder] Applying exact ODGI topological sort...");
+        }
+        graph.apply_exact_odgi_ordering(verbose);
+        
         Ok(graph)
     }
 

@@ -1,10 +1,10 @@
 pub mod bidirected_builder;
 pub mod bidirected_compaction;
+pub mod bidirected_gfa_writer;
 pub mod bidirected_graph;
 pub mod bidirected_ops;
 pub mod bidirected_union_find;
-// pub mod odgi_topological_sort;  // Disabled - made things worse
-// pub mod odgi_topological_sort_hashgraph;  // Disabled - made things worse
+// Old topological sort implementations removed - using exact ODGI implementation in bidirected_ops.rs
 pub mod cigar_analysis;
 pub mod embedded_builder;
 pub mod embedded_graph;
@@ -24,7 +24,7 @@ pub mod wfa;
 // pub mod handlegraph_builder_v2;  // Replaced by simple_handlegraph
 pub mod bidirected_unchop;
 pub mod handlegraph_unchop_proper;
-pub mod simple_handlegraph;
+// pub mod simple_handlegraph;  // Removed - using direct BidirectedGraph
 pub mod simple_unchop;
 pub mod utils;
 

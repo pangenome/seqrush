@@ -906,8 +906,8 @@ impl SeqRush {
         let verbose = args.verbose;
         let _test_mode = args.test_mode;
 
-        // Always use handlegraph implementation
-        self.write_handlegraph_gfa(output_path, args.no_compact, args.no_sort, verbose)
+        // Use direct BidirectedGraph writing (no HashGraph conversion)
+        self.write_bidirected_gfa(output_path, args.no_compact, args.no_sort, verbose)
     }
 
     fn build_initial_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {
