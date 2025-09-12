@@ -32,7 +32,6 @@ impl BidirectedGraph {
             // Merge each component
             for component in components {
                 if component.len() >= 2 {
-                    eprintln!("Compaction iteration {}: merging chain of {} nodes", iteration, component.len());
                     if self.merge_component_v2(&component) {
                         compacted = true;
                     }
@@ -288,7 +287,7 @@ impl BidirectedGraph {
                     }
                     
                     // If we get here, the handle appears but not as part of a complete chain
-                    eprintln!("Cannot compact: handle {} appears individually in path {}", path.steps[i], path.name);
+                    // Cannot compact this chain
                     return false;
                 }
                 i += 1;
@@ -790,6 +789,38 @@ impl BidirectedGraph {
         }
 
         Ok(())
+    }
+    
+    /// Verify that all edges needed for paths exist in the graph
+    pub fn verify_path_edges(&mut self, verbose: bool) {
+        let mut missing_edges = Vec::new();
+        let mut added_edges = 0;
+        
+        for path in &self.paths {
+            for i in 0..path.steps.len().saturating_sub(1) {
+                let from = path.steps[i];
+                let to = path.steps[i + 1];
+                let edge = BiEdge::new(from, to);
+                
+                if !self.edges.contains(&edge) {
+                    missing_edges.push((path.name.clone(), from, to));
+                    // Add the missing edge
+                    self.edges.insert(edge);
+                    added_edges += 1;
+                }
+            }
+        }
+        
+        if verbose && !missing_edges.is_empty() {
+            eprintln!("WARNING: Found {} missing edges needed for paths", missing_edges.len());
+            for (path_name, from, to) in missing_edges.iter().take(10) {
+                eprintln!("  Path {}: edge {} -> {} was missing", path_name, from, to);
+            }
+            if missing_edges.len() > 10 {
+                eprintln!("  ... and {} more", missing_edges.len() - 10);
+            }
+            eprintln!("Added {} missing edges", added_edges);
+        }
     }
 
     /// Perform bidirected topological sort using modified Kahn's algorithm

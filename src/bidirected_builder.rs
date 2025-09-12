@@ -232,11 +232,20 @@ impl SeqRush {
             eprintln!("[bidirected_builder] Does graph have node 2? {}", graph.nodes.contains_key(&2));
         }
 
+        // Verify all path edges exist before sorting
+        if verbose {
+            eprintln!("[bidirected_builder] Verifying path edges...");
+        }
+        graph.verify_path_edges(verbose);
+        
         // Apply exact ODGI topological sort by default
         if verbose {
             eprintln!("[bidirected_builder] Applying exact ODGI topological sort...");
         }
         graph.apply_exact_odgi_ordering(verbose);
+        
+        // Verify edges again after sorting
+        graph.verify_path_edges(verbose);
         
         Ok(graph)
     }

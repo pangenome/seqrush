@@ -557,9 +557,7 @@ impl SeqRush {
         }
         // IMPORTANT: query_is_rc means the QUERY (seq1) was reverse complemented for alignment
         // Debug specific alignment
-        let debug_this = (seq1.id.contains("299782605") || seq2.id.contains("299782605"))
-            && query_is_rc
-            || (verbose && (seq1.id.contains("seq2") || seq2.id.contains("seq2")));
+        let debug_this = false;
         // Add validation function
         let validate_match = |seq1: &Sequence,
                               seq2: &Sequence,

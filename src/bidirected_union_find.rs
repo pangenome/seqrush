@@ -85,12 +85,6 @@ impl BidirectedUnionFind {
                 // seq2 is always forward in this case
                 let pos2_fwd = make_pos(seq2_offset + seq2_local_start + i, false);
 
-                if debug || (seq1_offset == 100 && seq2_offset == 200 && match_length == 3) {
-                    eprintln!("  [BIDIRECTED_UF_DEBUG] RC transform: rc_local[{}] = {} -> forward_local[{}] = {} -> global[{}] = {}",
-                        i, rc_local_pos, i, forward_local_pos, i, seq1_global_offset);
-                    eprintln!("    Unite: pos1_rev={} (make_pos({}, true)) <-> pos2_fwd={} (make_pos({}, false))", 
-                        pos1_rev, seq1_global_offset, pos2_fwd, seq2_offset + seq2_local_start + i);
-                }
 
                 // Unite seq1 reverse with seq2 forward
                 self.unite(pos1_rev, pos2_fwd);

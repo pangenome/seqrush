@@ -34,13 +34,21 @@ impl SeqRush {
                 let nodes_after = bi_graph.nodes.len();
                 eprintln!("[bidirected_gfa] Compacted from {} to {} nodes", nodes_before, nodes_after);
                 
+                // Verify edges after compaction
+                bi_graph.verify_path_edges(verbose);
+                
                 // Re-apply topological sort after compaction to fix node numbering
                 eprintln!("[bidirected_gfa] Re-applying topological sort after compaction...");
                 bi_graph.apply_exact_odgi_ordering(false);
+                
+                // Verify edges again after sorting
+                bi_graph.verify_path_edges(verbose);
             } else {
                 bi_graph.compact();
+                bi_graph.verify_path_edges(false);
                 // Re-apply topological sort after compaction to fix node numbering
                 bi_graph.apply_exact_odgi_ordering(false);
+                bi_graph.verify_path_edges(false);
             }
         }
         
