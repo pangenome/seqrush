@@ -1,7 +1,7 @@
 use crate::bidirected_graph::{BiEdge, Handle};
 use crate::bidirected_ops::BidirectedGraph;
 use crate::graph_ops::{Edge, Graph, Node};
-use crate::pos::{make_pos, offset, Pos};
+use crate::pos::{is_rev, make_pos, offset, Pos};
 use crate::seqrush::{SeqRush, Sequence};
 use std::collections::HashMap;
 
@@ -10,6 +10,14 @@ impl SeqRush {
     pub fn build_bidirected_graph(
         &self,
         verbose: bool,
+    ) -> Result<BidirectedGraph, Box<dyn std::error::Error>> {
+        self.build_bidirected_graph_with_options(verbose, true)
+    }
+
+    pub fn build_bidirected_graph_with_options(
+        &self,
+        verbose: bool,
+        apply_sort: bool,
     ) -> Result<BidirectedGraph, Box<dyn std::error::Error>> {
         let mut graph = BidirectedGraph::new();
 
@@ -42,12 +50,12 @@ impl SeqRush {
 
                 // For this position, check which orientation (if any) has already been
                 // mapped to a node.
-                let (union_rep, path_orientation) = if union_to_node.contains_key(&union_fwd) {
+                let union_rep = if union_to_node.contains_key(&union_fwd) {
                     // Forward orientation already has a node
-                    (union_fwd, false)
+                    union_fwd
                 } else if union_to_node.contains_key(&union_rev) {
                     // Reverse orientation already has a node
-                    (union_rev, true)
+                    union_rev
                 } else {
                     // Neither exact union is in the map. But they might be united with
                     // other unions that ARE in the map. We need to find the canonical
@@ -59,9 +67,9 @@ impl SeqRush {
 
                     // Check if these roots are already mapped
                     if union_to_node.contains_key(&fwd_root) {
-                        (fwd_root, false)
+                        fwd_root
                     } else if union_to_node.contains_key(&rev_root) {
-                        (rev_root, true)
+                        rev_root
                     } else {
                         // Still not found. One more check: maybe this position's union
                         // was united with something else that's already in the map.
@@ -94,7 +102,7 @@ impl SeqRush {
                                         union_fwd, existing_union
                                     );
                                 }
-                                found = Some((existing_union, false));
+                                found = Some(existing_union);
                                 break;
                             }
                             // Check if current position's reverse union is in same component
@@ -105,23 +113,23 @@ impl SeqRush {
                                         union_rev, existing_union
                                     );
                                 }
-                                found = Some((existing_union, true));
+                                found = Some(existing_union);
                                 break;
                             }
                         }
 
-                        if let Some((existing, orientation)) = found {
-                            (existing, orientation)
+                        if let Some(existing) = found {
+                            existing
                         } else {
                             // Truly new union - use forward by default
-                            (union_fwd, false)
+                            union_fwd
                         }
                     }
                 };
 
                 if verbose && (i < 5 || seq.id == "seq2") {
-                    eprintln!("  [BIDIRECTED] {} pos {} - fwd_union: {}, rev_union: {}, chosen: {} (orientation: {})", 
-                        seq.id, i, union_fwd, union_rev, union_rep, if path_orientation { "rev" } else { "fwd" });
+                    eprintln!("  [BIDIRECTED] {} pos {} - fwd_union: {}, rev_union: {}, chosen: {}",
+                        seq.id, i, union_fwd, union_rev, union_rep);
                     // Debug: show what's already in union_to_node
                     if seq.id == "seq2" && i == 0 {
                         eprintln!("  Current union_to_node mappings:");
@@ -133,9 +141,15 @@ impl SeqRush {
                     }
                 }
 
-                // Get or create node ID
-                let node_id = match union_to_node.get(&union_rep) {
-                    Some(&id) => id,
+                // Get or create node ID and determine its stored base
+                let (node_id, node_base) = match union_to_node.get(&union_rep) {
+                    Some(&id) => {
+                        // Node already exists, get its base
+                        let node_base = graph.nodes.get(&id)
+                            .map(|n| n.sequence[0])
+                            .unwrap_or(seq.data[i]);
+                        (id, node_base)
+                    },
                     None => {
                         let id = next_node_id;
                         next_node_id += 1;
@@ -157,6 +171,7 @@ impl SeqRush {
                         }
 
                         // Create node with the base from the union representative position
+                        // Store the forward base - paths will handle orientation
                         let base =
                             if let Some(source_seq) = self.find_sequence_for_position(union_rep) {
                                 let local_offset = offset(union_rep) - source_seq.offset;
@@ -166,12 +181,24 @@ impl SeqRush {
                             };
 
                         graph.add_node(id, vec![base]);
-                        id
+                        (id, base)
                     }
                 };
 
-                // Add handle with determined orientation to path
-                let handle = Handle::new(node_id, path_orientation);
+                // Determine path orientation based on whether we need to flip to get the correct base
+                let expected_base = seq.data[i].to_ascii_uppercase();
+                let node_base_upper = node_base.to_ascii_uppercase();
+
+                let need_reverse = match (node_base_upper, expected_base) {
+                    (b'A', b'T') => true,
+                    (b'T', b'A') => true,
+                    (b'C', b'G') => true,
+                    (b'G', b'C') => true,
+                    _ => false, // Same base or ambiguous - use forward
+                };
+
+                // Add handle with correct orientation to path
+                let handle = Handle::new(node_id, need_reverse);
                 path_handles.push(handle);
             }
 
@@ -238,11 +265,15 @@ impl SeqRush {
         }
         graph.verify_path_edges(verbose);
         
-        // Apply exact ODGI topological sort by default
-        if verbose {
-            eprintln!("[bidirected_builder] Applying exact ODGI topological sort...");
+        // Apply exact ODGI topological sort if requested
+        if apply_sort {
+            if verbose {
+                eprintln!("[bidirected_builder] Applying exact ODGI topological sort...");
+            }
+            graph.apply_exact_odgi_ordering(verbose);
+        } else if verbose {
+            eprintln!("[bidirected_builder] Skipping topological sort (--no-sort)");
         }
-        graph.apply_exact_odgi_ordering(verbose);
         
         // Verify edges again after sorting
         graph.verify_path_edges(verbose);

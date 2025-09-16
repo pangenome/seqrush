@@ -16,6 +16,53 @@ impl Default for BidirectedGraph {
 }
 
 impl BidirectedGraph {
+    /// Apply a node ID remapping to renumber nodes in the graph
+    pub fn apply_node_id_mapping(&mut self, mapping: &HashMap<usize, usize>) {
+        // Create new nodes with remapped IDs
+        let mut new_nodes = HashMap::new();
+        for (old_id, node) in &self.nodes {
+            let new_id = mapping.get(old_id).copied().unwrap_or(*old_id);
+            let mut new_node = node.clone();
+            new_node.id = new_id;
+            new_nodes.insert(new_id, new_node);
+        }
+        self.nodes = new_nodes;
+
+        // Update edges with new node IDs
+        let mut new_edges = HashSet::new();
+        for edge in &self.edges {
+            let new_from_id = mapping.get(&edge.from.node_id()).copied().unwrap_or(edge.from.node_id());
+            let new_to_id = mapping.get(&edge.to.node_id()).copied().unwrap_or(edge.to.node_id());
+
+            let new_from = if edge.from.is_reverse() {
+                Handle::reverse(new_from_id)
+            } else {
+                Handle::forward(new_from_id)
+            };
+
+            let new_to = if edge.to.is_reverse() {
+                Handle::reverse(new_to_id)
+            } else {
+                Handle::forward(new_to_id)
+            };
+
+            new_edges.insert(BiEdge::new(new_from, new_to));
+        }
+        self.edges = new_edges;
+
+        // Update paths with new node IDs
+        for path in &mut self.paths {
+            for handle in &mut path.steps {
+                let new_id = mapping.get(&handle.node_id()).copied().unwrap_or(handle.node_id());
+                *handle = if handle.is_reverse() {
+                    Handle::reverse(new_id)
+                } else {
+                    Handle::forward(new_id)
+                };
+            }
+        }
+    }
+
     /// Compact the graph by merging linear chains of nodes
     pub fn compact(&mut self) {
         let mut compacted = true;
@@ -1041,25 +1088,26 @@ impl BidirectedGraph {
     /// In a bidirected graph, we check for incoming edges to the forward orientation
     pub fn find_head_nodes(&self) -> Vec<Handle> {
         let mut heads = Vec::new();
-        
+
         for &node_id in self.nodes.keys() {
-            let forward_handle = Handle::forward(node_id);
+            // Only check forward orientation, matching ODGI's behavior
+            let handle = Handle::forward(node_id);
             let mut has_incoming = false;
-            
+
             // Check if any edge comes TO this handle
             for edge in &self.edges {
-                if edge.to == forward_handle {
+                if edge.to == handle {
                     has_incoming = true;
                     break;
                 }
             }
-            
+
             if !has_incoming {
-                heads.push(forward_handle);
+                heads.push(handle);
             }
         }
-        
-        // Sort for deterministic behavior (ODGI uses ordered containers)
+
+        // Sort for deterministic behavior
         heads.sort_by_key(|h| h.node_id());
         heads
     }
@@ -1208,11 +1256,15 @@ impl BidirectedGraph {
                 
                 // Look at edges coming into this handle (backward edges)
                 // These are edges that should be "consumed" by placing this handle
-                for edge in &self.edges.clone() {
+                // Sort edges for deterministic iteration
+                let mut edges_vec: Vec<_> = self.edges.iter().cloned().collect();
+                edges_vec.sort_by_key(|e| (e.from.node_id(), e.from.is_reverse(), e.to.node_id(), e.to.is_reverse()));
+
+                for edge in &edges_vec {
                     if edge.to == handle && !masked_edges.contains(edge) {
                         masked_edges.insert(edge.clone());
                         if verbose {
-                            eprintln!("[exact_odgi]   Masking incoming edge: {} {} -> {} {}", 
+                            eprintln!("[exact_odgi]   Masking incoming edge: {} {} -> {} {}",
                                      edge.from.node_id(),
                                      if edge.from.is_reverse() { "-" } else { "+" },
                                      edge.to.node_id(),
@@ -1220,9 +1272,9 @@ impl BidirectedGraph {
                         }
                     }
                 }
-                
+
                 // Look at edges going out from this handle (forward edges)
-                for edge in &self.edges.clone() {
+                for edge in &edges_vec {
                     if edge.from == handle && !masked_edges.contains(edge) {
                         masked_edges.insert(edge.clone());
                         let next_handle = edge.to;
@@ -1240,8 +1292,8 @@ impl BidirectedGraph {
                             // Check if next_handle has any other unmasked incoming edges
                             let mut has_unmasked_incoming = false;
                             
-                            for other_edge in &self.edges {
-                                if other_edge.to == next_handle && 
+                            for other_edge in &edges_vec {
+                                if other_edge.to == next_handle &&
                                    !masked_edges.contains(other_edge) {
                                     has_unmasked_incoming = true;
                                     break;

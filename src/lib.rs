@@ -9,6 +9,7 @@ pub mod cigar_analysis;
 pub mod embedded_builder;
 pub mod embedded_graph;
 pub mod graph_compaction;
+pub mod groom;
 pub mod graph_ops;
 pub mod inversion_aware_seqrush;
 pub mod pos;

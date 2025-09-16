@@ -84,6 +84,22 @@ pub struct Args {
     /// Disable topological sorting of nodes (sorting is enabled by default)
     #[arg(long = "no-sort", default_value = "false")]
     pub no_sort: bool,
+
+    /// Apply grooming before sorting to orient graph consistently
+    #[arg(long = "groom", default_value = "false")]
+    pub groom: bool,
+
+    /// Use sort-groom-sort strategy (sort, then groom, then sort again)
+    #[arg(long = "sort-groom-sort", default_value = "false")]
+    pub sort_groom_sort: bool,
+
+    /// Apply iterative grooming until stabilization (max N iterations)
+    #[arg(long = "iterative-groom", value_name = "N")]
+    pub iterative_groom: Option<usize>,
+
+    /// Apply ODGI-style grooming with traversal-based node reordering
+    #[arg(long = "odgi-groom", default_value = "false")]
+    pub odgi_style_groom: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -905,7 +921,16 @@ impl SeqRush {
         let _test_mode = args.test_mode;
 
         // Use direct BidirectedGraph writing (no HashGraph conversion)
-        self.write_bidirected_gfa(output_path, args.no_compact, args.no_sort, verbose)
+        self.write_bidirected_gfa(
+            output_path,
+            args.no_compact,
+            args.no_sort,
+            args.groom,
+            args.sort_groom_sort,
+            args.iterative_groom,
+            args.odgi_style_groom,
+            verbose,
+        )
     }
 
     fn build_initial_graph(&self, verbose: bool) -> Result<Graph, Box<dyn std::error::Error>> {
@@ -1143,7 +1168,7 @@ impl SeqRush {
         graph.nodes.values().map(|node| node.sequence.len()).sum()
     }
 
-    fn validate_paths_match_sequences(
+    pub fn validate_paths_match_sequences(
         &self,
         graph: &BidirectedGraph,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1173,13 +1198,24 @@ impl SeqRush {
                 eprintln!("  Original length: {} bp", seq.data.len());
                 eprintln!("  Path length:     {} bp", path_sequence.len());
 
-                // Show first difference
+                // Show first difference and context
                 for (i, (&orig, &path)) in seq.data.iter().zip(path_sequence.iter()).enumerate() {
                     if orig != path {
                         eprintln!(
-                            "  First difference at position {}: {} vs {}",
+                            "  First difference at position {}: '{}' (expected) vs '{}' (got)",
                             i, orig as char, path as char
                         );
+
+                        // Show context around the difference
+                        let start = i.saturating_sub(5);
+                        let end = (i + 6).min(seq.data.len()).min(path_sequence.len());
+                        eprintln!("  Context:");
+                        eprintln!("    Original[{}..{}]: '{}'",
+                            start, end,
+                            String::from_utf8_lossy(&seq.data[start..end]));
+                        eprintln!("    Path[{}..{}]:     '{}'",
+                            start, end,
+                            String::from_utf8_lossy(&path_sequence[start..end]));
                         break;
                     }
                 }

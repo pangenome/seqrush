@@ -1,0 +1,384 @@
+/// Grooming algorithm to remove spurious inverting links from the graph
+/// by exploring from the orientation supported by the most paths.
+///
+/// Based on ODGI's grooming algorithm
+
+use crate::bidirected_graph::Handle;
+use crate::bidirected_ops::BidirectedGraph;
+use std::collections::{HashSet, VecDeque};
+
+impl BidirectedGraph {
+    /// Apply grooming to orient the graph consistently
+    /// This explores the graph via BFS/DFS from seed nodes and flips nodes
+    /// as needed to maintain consistent orientation along paths
+    /// Returns handles in their CURRENT order (like ODGI), just with flipped orientations
+    pub fn groom(&mut self, use_bfs: bool, verbose: bool) -> Vec<Handle> {
+        if verbose {
+            eprintln!("[groom] Starting grooming with {} nodes", self.nodes.len());
+        }
+
+        // Find seed nodes - start with head nodes
+        let seeds = self.find_head_nodes();
+
+        if verbose {
+            eprintln!("[groom] Found {} head nodes as seeds", seeds.len());
+        }
+
+        // Track visited and flipped status
+        let mut visited = HashSet::new();
+        let mut flipped = HashSet::new();
+
+        // If we have no heads, pick the first node as seed
+        let mut current_seeds = if seeds.is_empty() {
+            if let Some(&node_id) = self.nodes.keys().min() {
+                vec![Handle::forward(node_id)]
+            } else {
+                vec![]
+            }
+        } else {
+            seeds
+        };
+
+        // Process all components
+        let mut component_count = 0;
+        while visited.len() < self.nodes.len() {
+            if current_seeds.is_empty() {
+                // Find an unvisited node as new seed
+                for &node_id in self.nodes.keys() {
+                    if !visited.contains(&node_id) {
+                        current_seeds.push(Handle::forward(node_id));
+                        if verbose {
+                            eprintln!("[groom] Starting new component with node {}", node_id);
+                        }
+                        component_count += 1;
+                        break;
+                    }
+                }
+                if current_seeds.is_empty() {
+                    break; // All nodes visited
+                }
+            }
+
+            let visited_before = visited.len();
+            if use_bfs {
+                self.groom_bfs(&current_seeds, &mut visited, &mut flipped);
+            } else {
+                self.groom_dfs(&current_seeds, &mut visited, &mut flipped);
+            }
+
+            if verbose && visited.len() > visited_before {
+                eprintln!("[groom] Component {} visited {} nodes",
+                         component_count, visited.len() - visited_before);
+            }
+
+            current_seeds.clear();
+        }
+
+        // Build the final handle order in CURRENT NODE ORDER (like ODGI)
+        // Get nodes in sorted order
+        let mut node_ids: Vec<_> = self.nodes.keys().copied().collect();
+        node_ids.sort();
+
+        let mut final_order = Vec::new();
+        for node_id in node_ids {
+            let handle = if flipped.contains(&node_id) {
+                Handle::reverse(node_id)
+            } else {
+                Handle::forward(node_id)
+            };
+            final_order.push(handle);
+        }
+
+        if verbose {
+            eprintln!("[groom] Flipped {} nodes", flipped.len());
+        }
+
+        final_order
+    }
+
+    /// BFS-based grooming with traversal order tracking
+    fn groom_bfs_with_order(&self, seeds: &[Handle], visited: &mut HashSet<usize>,
+                            flipped: &mut HashSet<usize>, order: &mut Vec<usize>) {
+        let mut queue = VecDeque::new();
+
+        // Initialize queue with seeds
+        for &seed in seeds {
+            if !visited.contains(&seed.node_id()) {
+                queue.push_back(seed);
+                visited.insert(seed.node_id());
+                order.push(seed.node_id());  // Track traversal order
+
+                // ODGI logic: flip if we visit via reverse orientation
+                if seed.is_reverse() {
+                    flipped.insert(seed.node_id());
+                }
+            }
+        }
+
+        // BFS traversal
+        while let Some(current) = queue.pop_front() {
+            // Get edges from this handle
+            for edge in &self.edges {
+                if edge.from == current {
+                    let next = edge.to;
+                    if !visited.contains(&next.node_id()) {
+                        visited.insert(next.node_id());
+                        order.push(next.node_id());  // Track traversal order
+
+                        // ODGI logic: mark as flipped if we reach it via reverse orientation
+                        if next.is_reverse() {
+                            flipped.insert(next.node_id());
+                        }
+
+                        // Continue BFS from the handle we arrived at
+                        queue.push_back(next);
+                    }
+                }
+            }
+        }
+    }
+
+    /// DFS-based grooming with traversal order tracking
+    fn groom_dfs_with_order(&self, seeds: &[Handle], visited: &mut HashSet<usize>,
+                            flipped: &mut HashSet<usize>, order: &mut Vec<usize>) {
+        let mut stack = Vec::new();
+
+        // Initialize stack with seeds
+        for &seed in seeds {
+            stack.push(seed);
+        }
+
+        // DFS traversal
+        while let Some(current) = stack.pop() {
+            if visited.contains(&current.node_id()) {
+                continue;
+            }
+
+            visited.insert(current.node_id());
+            order.push(current.node_id());  // Track traversal order
+
+            if current.is_reverse() {
+                flipped.insert(current.node_id());
+            }
+
+            // Get edges from this handle
+            for edge in &self.edges {
+                if edge.from == current {
+                    let next = edge.to;
+                    if !visited.contains(&next.node_id()) {
+                        stack.push(next);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Keep old BFS for compatibility
+    fn groom_bfs(&self, seeds: &[Handle], visited: &mut HashSet<usize>, flipped: &mut HashSet<usize>) {
+        let mut _order = Vec::new();
+        self.groom_bfs_with_order(seeds, visited, flipped, &mut _order);
+    }
+
+    /// Keep old DFS for compatibility
+    fn groom_dfs(&self, seeds: &[Handle], visited: &mut HashSet<usize>, flipped: &mut HashSet<usize>) {
+        let mut _order = Vec::new();
+        self.groom_dfs_with_order(seeds, visited, flipped, &mut _order);
+    }
+
+    /// Apply grooming then topological sort
+    pub fn groom_and_sort(&mut self, verbose: bool) {
+        if verbose {
+            eprintln!("[groom_and_sort] Starting groom and sort process");
+        }
+
+        // Step 1: Apply grooming
+        let groomed_order = self.groom(true, verbose); // Use BFS
+
+        // Apply the grooming orientation changes
+        self.apply_grooming(groomed_order.clone(), verbose);
+
+        // Step 2: Apply topological sort
+        if verbose {
+            eprintln!("[groom_and_sort] Applying topological sort after grooming");
+        }
+        self.apply_exact_odgi_ordering(verbose);
+
+        if verbose {
+            eprintln!("[groom_and_sort] Groom and sort complete");
+        }
+    }
+
+    /// Alternative: Sort first, then groom, then sort again
+    pub fn sort_groom_sort(&mut self, verbose: bool) {
+        if verbose {
+            eprintln!("[sort_groom_sort] Starting sort-groom-sort process");
+        }
+
+        // Step 1: Initial topological sort
+        if verbose {
+            eprintln!("[sort_groom_sort] Initial topological sort");
+        }
+        self.apply_exact_odgi_ordering(false);
+
+        // Step 2: Apply grooming
+        if verbose {
+            eprintln!("[sort_groom_sort] Grooming after first sort");
+        }
+        let groomed_order = self.groom(true, false); // Use BFS
+        self.apply_grooming(groomed_order, false);
+
+        // Step 3: Final topological sort
+        if verbose {
+            eprintln!("[sort_groom_sort] Final topological sort");
+        }
+        self.apply_exact_odgi_ordering(false);
+
+        if verbose {
+            eprintln!("[sort_groom_sort] Sort-groom-sort complete");
+        }
+    }
+
+    /// Iterative sort-groom-sort until stabilization or max iterations
+    pub fn iterative_groom(&mut self, max_iterations: usize, verbose: bool) -> usize {
+        if verbose {
+            eprintln!("[iterative_groom] Starting iterative grooming (max {} iterations)", max_iterations);
+        }
+
+        let mut iteration = 0;
+        let mut prev_flipped_count = usize::MAX;
+
+        while iteration < max_iterations {
+            iteration += 1;
+
+            if verbose {
+                eprintln!("[iterative_groom] === Iteration {} ===", iteration);
+            }
+
+            // Step 1: Sort
+            if verbose {
+                eprintln!("[iterative_groom] Sorting...");
+            }
+            self.apply_exact_odgi_ordering(false);
+
+            // Step 2: Groom and count how many nodes were flipped
+            if verbose {
+                eprintln!("[iterative_groom] Grooming...");
+            }
+            let groomed_order = self.groom(true, false);
+
+            // Count how many nodes need flipping
+            let flipped_count = groomed_order.iter()
+                .filter(|h| h.is_reverse())
+                .count();
+
+            if verbose {
+                eprintln!("[iterative_groom] Iteration {} flipped {} nodes", iteration, flipped_count);
+            }
+
+            // Apply the grooming
+            self.apply_grooming(groomed_order, false);
+
+            // Step 3: Final sort
+            if verbose {
+                eprintln!("[iterative_groom] Final sort...");
+            }
+            self.apply_exact_odgi_ordering(false);
+
+            // Check for stabilization
+            if flipped_count == prev_flipped_count || flipped_count == 0 {
+                if verbose {
+                    eprintln!("[iterative_groom] Stabilized after {} iterations", iteration);
+                }
+                break;
+            }
+
+            prev_flipped_count = flipped_count;
+        }
+
+        if verbose && iteration == max_iterations {
+            eprintln!("[iterative_groom] Reached maximum iterations ({})", max_iterations);
+        }
+
+        iteration
+    }
+
+    /// Apply grooming changes (flip nodes as needed and optionally reorder)
+    fn apply_grooming(&mut self, groomed_handles: Vec<Handle>, verbose: bool) {
+        self.apply_grooming_with_reorder(groomed_handles, false, verbose);
+    }
+
+    /// Apply grooming changes with optional node reordering (like ODGI does)
+    pub fn apply_grooming_with_reorder(&mut self, groomed_handles: Vec<Handle>, reorder: bool, verbose: bool) {
+        // Build a map of which nodes need to be flipped
+        let mut node_flips = HashSet::new();
+
+        for handle in &groomed_handles {
+            if handle.is_reverse() {
+                node_flips.insert(handle.node_id());
+            }
+        }
+
+        if verbose && !node_flips.is_empty() {
+            eprintln!("[apply_grooming] Flipping {} nodes", node_flips.len());
+        }
+
+        // Flip the sequences of nodes that need flipping
+        for &node_id in &node_flips {
+            if let Some(node) = self.nodes.get_mut(&node_id) {
+                // Reverse complement the sequence
+                node.sequence = crate::bidirected_graph::reverse_complement(&node.sequence);
+            }
+        }
+
+        // Update edges: when a node is flipped, we XOR the orientation of handles to/from it
+        let mut new_edges = HashSet::new();
+        for edge in self.edges.drain() {
+            // XOR orientations if the node is flipped
+            let new_from = if node_flips.contains(&edge.from.node_id()) {
+                edge.from.flip()
+            } else {
+                edge.from
+            };
+
+            let new_to = if node_flips.contains(&edge.to.node_id()) {
+                edge.to.flip()
+            } else {
+                edge.to
+            };
+
+            new_edges.insert(crate::bidirected_graph::BiEdge::new(new_from, new_to));
+        }
+        self.edges = new_edges;
+
+        // Update paths: XOR the orientation when a node is flipped
+        for path in &mut self.paths {
+            for handle in &mut path.steps {
+                if node_flips.contains(&handle.node_id()) {
+                    *handle = handle.flip();
+                }
+            }
+        }
+
+        // Apply node reordering if requested (like ODGI does)
+        if reorder {
+            if verbose {
+                eprintln!("[apply_grooming] Applying node reordering based on traversal order");
+            }
+
+            // Create mapping from old node IDs to new ones based on traversal order
+            let mut id_mapping = std::collections::HashMap::new();
+            for (new_id, handle) in groomed_handles.iter().enumerate() {
+                let old_id = handle.node_id();
+                let new_node_id = new_id + 1; // Node IDs start from 1
+                id_mapping.insert(old_id, new_node_id);
+            }
+
+            // Apply the reordering
+            self.apply_node_id_mapping(&id_mapping);
+        }
+
+        if verbose {
+            eprintln!("[apply_grooming] Grooming complete");
+        }
+    }
+}
