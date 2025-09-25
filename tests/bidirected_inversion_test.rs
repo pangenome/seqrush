@@ -41,6 +41,11 @@ fn test_simple_inversion() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+        groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -114,6 +119,11 @@ fn test_complex_rearrangement() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+        groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -195,6 +205,11 @@ fn test_self_inverse_palindrome() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+        groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

@@ -63,6 +63,11 @@ mod reverse_complement_tests {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         // Build the graph
@@ -120,6 +125,11 @@ mod reverse_complement_tests {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         run_seqrush(args).unwrap();
@@ -187,6 +197,11 @@ mod reverse_complement_tests {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         run_seqrush(args).unwrap();
@@ -308,6 +323,11 @@ mod reverse_complement_tests {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         run_seqrush(args).unwrap();

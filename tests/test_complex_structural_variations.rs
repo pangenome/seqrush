@@ -97,6 +97,11 @@ fn test_inverted_repeats() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -152,6 +157,11 @@ fn test_complex_cnv_repeats() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -204,6 +214,11 @@ fn test_y_shaped_breakpoint() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -250,6 +265,11 @@ fn test_nested_inversions() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -307,6 +327,11 @@ fn test_random_rearrangements() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -365,6 +390,11 @@ fn test_tandem_repeat_polymorphism() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -418,6 +448,11 @@ fn test_complex_nested_variations() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -475,6 +510,11 @@ fn test_interspersed_repeats_with_inversions() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -539,6 +579,11 @@ fn test_breakpoint_resolution() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();

@@ -31,6 +31,11 @@ fn test_rc_sequences_share_nodes() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     let output_path = args.output.clone();
@@ -108,6 +113,11 @@ fn test_node_sequence_consistency() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     let output_path = args.output.clone();

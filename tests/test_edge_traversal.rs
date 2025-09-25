@@ -43,6 +43,11 @@ fn test_no_untraversed_edges_in_output() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -111,6 +116,11 @@ fn test_self_loops_in_gfa() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -170,6 +180,11 @@ fn test_complex_graph_produces_valid_gfa() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush(args).unwrap();

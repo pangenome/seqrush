@@ -33,6 +33,11 @@ fn test_sorting_creates_sequential_node_ids() {
         validate_paf: false,
         seqwish_style: false,
         no_sort: false,  // Sorting enabled
+        groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
     
     run_seqrush(args_sorted).unwrap();
@@ -55,6 +60,11 @@ fn test_sorting_creates_sequential_node_ids() {
         validate_paf: false,
         seqwish_style: false,
         no_sort: true,  // Sorting disabled
+        groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
     
     run_seqrush(args_unsorted).unwrap();
@@ -154,6 +164,11 @@ fn test_sorting_preserves_graph_structure() {
         validate_paf: false,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
     
     run_seqrush(args_sorted).unwrap();
@@ -176,6 +191,11 @@ fn test_sorting_preserves_graph_structure() {
         validate_paf: false,
         seqwish_style: false,
         no_sort: true,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
     
     run_seqrush(args_unsorted).unwrap();

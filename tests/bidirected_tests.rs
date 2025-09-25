@@ -58,6 +58,11 @@ fn test_simple_forward_sequence() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -99,6 +104,11 @@ fn test_reverse_complement_alignment() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -143,6 +153,11 @@ fn test_palindromic_sequence() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -181,6 +196,11 @@ fn test_inversion_between_sequences() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -229,6 +249,11 @@ fn test_complex_rearrangement() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -265,6 +290,11 @@ fn test_self_alignment_with_repeats() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -338,6 +368,11 @@ fn test_multiple_sequence_alignment() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

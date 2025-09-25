@@ -91,6 +91,11 @@ fn test_base_case_empty() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -140,6 +145,11 @@ fn test_base_case_single_base() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -236,6 +246,11 @@ fn test_identical_sequences_share_nodes() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -286,6 +301,11 @@ fn test_inductive_sequence_extension() {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         run_seqrush_bidirected_simple(args).unwrap();
@@ -380,6 +400,11 @@ fn test_path_reconstruction_correctness() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -435,6 +460,11 @@ fn test_edge_connectivity() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -489,6 +519,11 @@ fn test_palindromic_sequences() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -530,6 +565,11 @@ fn test_union_find_with_matches() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -583,6 +623,11 @@ fn test_large_sequences() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -625,6 +670,11 @@ fn test_transitivity_of_matches() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

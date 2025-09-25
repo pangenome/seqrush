@@ -52,6 +52,11 @@ fn test_performance_scaling() {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         let start = Instant::now();
@@ -138,6 +143,11 @@ fn test_real_world_example() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -177,6 +187,11 @@ fn test_command_line_interface() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush(args).unwrap();
@@ -228,6 +243,11 @@ fn test_parallel_consistency() {
             paf: None,
             seqwish_style: false,
         no_sort: false,
+                groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
         };
 
         run_seqrush(args).unwrap();

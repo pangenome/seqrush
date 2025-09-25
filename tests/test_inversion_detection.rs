@@ -41,6 +41,11 @@ fn test_inversion_detection_simple() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     println!("Running inversion-aware alignment...");
@@ -104,6 +109,11 @@ fn test_inversion_detection_with_context() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     println!("\nRunning inversion detection with context...");
@@ -147,6 +157,11 @@ fn test_no_inversion() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -188,6 +203,11 @@ fn test_multiple_inversions() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     println!("\nRunning multiple inversion detection...");

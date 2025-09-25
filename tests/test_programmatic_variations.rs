@@ -188,6 +188,11 @@ fn test_programmatic_inversions_scale() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -251,6 +256,11 @@ fn test_gc_content_variation() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -330,6 +340,11 @@ fn test_motif_based_variations() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -400,6 +415,11 @@ fn test_microsatellite_instability() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -472,6 +492,11 @@ fn test_complex_structural_variation_patterns() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -555,6 +580,11 @@ fn test_nested_tandem_inversions() {
         paf: None,
         seqwish_style: false,
         no_sort: false,
+            groom: false,
+        iterative_groom: None,
+        odgi_style_groom: false,
+        sort_groom_sort: false,
+        sgd_sort: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
