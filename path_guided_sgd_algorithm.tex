@@ -1,0 +1,256 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+
+\title{Path-Guided Stochastic Gradient Descent for Pangenome Graph Layout}
+\author{Mathematical Formulation and Algorithm Description}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Path-Guided Stochastic Gradient Descent (PG-SGD) is an algorithm for computing a one-dimensional layout of nodes in a pangenome graph such that the distances between nodes in the layout approximates their nucleotide distances along paths through the graph.
+
+\section{Problem Formulation}
+
+Given:
+\begin{itemize}
+    \item A pangenome graph $G = (V, E, P)$ where:
+    \begin{itemize}
+        \item $V$ is the set of nodes
+        \item $E$ is the set of edges
+        \item $P$ is the set of paths (genomes) through the graph
+    \end{itemize}
+    \item Each node $v_i \in V$ has a sequence of length $\ell_i$
+    \item Each path $p \in P$ is an ordered sequence of node traversals
+\end{itemize}
+
+Goal: Find a 1D layout $X: V \rightarrow \mathbb{R}$ that minimizes the difference between:
+\begin{itemize}
+    \item Layout distance: $|X_i - X_j|$ for nodes $v_i, v_j$
+    \item Nucleotide distance: $d_{ij}^{\text{path}}$ along paths
+\end{itemize}
+
+\section{Mathematical Formulation}
+
+\subsection{Objective Function}
+
+The algorithm implicitly minimizes the stress function:
+\begin{equation}
+\text{Stress} = \sum_{(i,j) \in S} w_{ij} \left( |X_i - X_j| - d_{ij} \right)^2
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $S$ is the set of sampled node pairs
+    \item $w_{ij}$ is the weight for pair $(i,j)$
+    \item $d_{ij}$ is the target distance (nucleotide distance along path)
+    \item $X_i, X_j$ are the 1D positions of nodes $i$ and $j$
+\end{itemize}
+
+\subsection{Weight Calculation}
+
+The weight for each pair is inversely proportional to the nucleotide distance:
+\begin{equation}
+w_{ij} = \frac{1}{d_{ij}}
+\end{equation}
+
+This gives more importance to pairs that are close together along paths.
+
+\subsection{Update Rule}
+
+For each sampled pair $(i,j)$, the positions are updated using:
+
+\begin{align}
+\Delta &= \mu \cdot \frac{|X_i - X_j| - d_{ij}}{2} \\
+r &= \frac{\Delta}{|X_i - X_j|} \\
+r_x &= r \cdot (X_i - X_j) \\
+X_i &\leftarrow X_i - r_x \\
+X_j &\leftarrow X_j + r_x
+\end{align}
+
+where:
+\begin{itemize}
+    \item $\mu = \min(\eta \cdot w_{ij}, 1)$ is the bounded learning rate
+    \item $\eta$ is the global learning rate (decreases over iterations)
+    \item $\Delta$ is the update magnitude
+    \item $r$ is the normalized update factor
+    \item $r_x$ is the actual position update
+\end{itemize}
+
+\subsection{Learning Rate Schedule}
+
+The learning rate follows an exponential decay:
+\begin{equation}
+\eta_t = \eta_{\max} \cdot e^{-\lambda t}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\eta_{\max} = 1/w_{\min}$ is the maximum learning rate
+    \item $\eta_{\min} = \epsilon/w_{\max}$ is the minimum learning rate
+    \item $\lambda = \ln(\eta_{\max}/\eta_{\min})/(t_{\max} - 1)$ is the decay rate
+    \item $t$ is the current iteration
+    \item $\epsilon$ is a small constant (default: 0.01)
+\end{itemize}
+
+\section{Sampling Strategy}
+
+\subsection{Path Step Sampling}
+
+At each iteration, the algorithm:
+\begin{enumerate}
+    \item Randomly samples a step $s_a$ from all path steps
+    \item Determines the path $p$ and position within path
+    \item Samples a second step $s_b$ from the same path
+\end{enumerate}
+
+\subsection{Second Step Selection}
+
+The second step $s_b$ is chosen using:
+
+\begin{itemize}
+    \item \textbf{Before cooling phase}: Uniform random sampling from the path
+    \item \textbf{After cooling phase}: Zipfian distribution sampling
+\end{itemize}
+
+\subsubsection{Zipfian Distribution}
+
+The probability of selecting a step at distance $k$ follows:
+\begin{equation}
+P(k) = \frac{k^{-\theta}}{\sum_{i=1}^{n} i^{-\theta}}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\theta$ is the Zipfian parameter (default: 0.99)
+    \item $n$ is the maximum jump distance (capped by path length)
+    \item Higher $\theta$ values favor smaller distances
+\end{itemize}
+
+\subsection{Distance Calculation}
+
+The nucleotide distance between steps is:
+\begin{equation}
+d_{ij} = |pos_a - pos_b|
+\end{equation}
+
+where $pos_a$ and $pos_b$ are the cumulative nucleotide positions of the steps along the path.
+
+\section{Algorithm}
+
+\begin{algorithm}
+\caption{Path-Guided SGD}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Graph $G$, paths $P$, iterations $t_{\max}$, parameters $\epsilon$, $\delta$, $\theta$
+\STATE \textbf{Output:} Node positions $X$
+
+\STATE Initialize $X$ with nodes in topological order
+\STATE Compute all path step positions
+\STATE Set cooling iteration $t_{\text{cool}} = 0.5 \cdot t_{\max}$
+
+\FOR{$t = 1$ to $t_{\max}$}
+    \STATE Update learning rate: $\eta_t = \eta_{\max} \cdot e^{-\lambda t}$
+
+    \WHILE{term updates $< \text{min\_updates}$}
+        \STATE Sample random step $s_a$ from all path steps
+        \STATE Get path $p$ and position of $s_a$
+
+        \IF{$t > t_{\text{cool}}$}
+            \STATE Sample $s_b$ using Zipfian distribution
+        \ELSE
+            \STATE Sample $s_b$ uniformly from path $p$
+        \ENDIF
+
+        \STATE Calculate $d_{ij} = |pos_a - pos_b|$
+        \STATE Calculate weight $w_{ij} = 1/d_{ij}$
+        \STATE Calculate $\mu = \min(\eta_t \cdot w_{ij}, 1)$
+
+        \STATE Get nodes $i, j$ from steps $s_a, s_b$
+        \STATE Calculate $\Delta = \mu \cdot (|X_i - X_j| - d_{ij})/2$
+
+        \STATE Update positions:
+        \STATE $r = \Delta / |X_i - X_j|$
+        \STATE $X_i \leftarrow X_i - r \cdot (X_i - X_j)$
+        \STATE $X_j \leftarrow X_j + r \cdot (X_i - X_j)$
+
+        \STATE Track $\Delta_{\max} = \max(\Delta_{\max}, |\Delta|)$
+    \ENDWHILE
+
+    \IF{$\Delta_{\max} < \delta$}
+        \STATE \textbf{break} // Converged
+    \ENDIF
+\ENDFOR
+
+\RETURN $X$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Convergence Criteria}
+
+The algorithm terminates when either:
+\begin{enumerate}
+    \item Maximum iterations $t_{\max}$ is reached (default: 30)
+    \item Maximum update $\Delta_{\max} < \delta$ (default: $\delta = 0.01$)
+\end{enumerate}
+
+\section{Parallelization}
+
+The algorithm uses HOGWILD! parallelization:
+\begin{itemize}
+    \item Multiple threads sample and update pairs concurrently
+    \item Position updates use atomic operations
+    \item No locks except for atomic position updates
+    \item Convergence checked periodically by a monitor thread
+\end{itemize}
+
+\section{Key Implementation Details}
+
+\subsection{Position Initialization}
+Nodes are initially placed according to their topological order, with position equal to cumulative sequence length:
+\begin{equation}
+X_i^{(0)} = \sum_{j<i} \ell_j
+\end{equation}
+
+\subsection{Handling Zero Distances}
+When $|X_i - X_j| = 0$, a small value ($10^{-9}$) is used to avoid division by zero.
+
+\subsection{Memory Efficiency}
+The algorithm avoids storing all pairwise distances by:
+\begin{itemize}
+    \item Computing distances on-the-fly during sampling
+    \item Using path index structures for fast position lookups
+    \item Storing only current node positions
+\end{itemize}
+
+\section{Parameters}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Default} & \textbf{Description} \\
+\hline
+$t_{\max}$ & 30 & Maximum iterations \\
+$\epsilon$ & 0.01 & Learning rate epsilon \\
+$\delta$ & 0.01 & Convergence threshold \\
+$\theta$ & 0.99 & Zipfian parameter \\
+cooling\_start & 0.5 & Fraction of iterations before cooling \\
+min\_term\_updates & 1000 & Updates per iteration \\
+space & 100 & Maximum jump distance \\
+\hline
+\end{tabular}
+\caption{Default PG-SGD parameters in ODGI}
+\end{table}
+
+\section{Conclusion}
+
+Path-Guided SGD leverages the path structure of pangenome graphs to efficiently compute a 1D layout where nodes that are close along genomic paths are placed close together in the layout. The algorithm's use of stochastic sampling and the HOGWILD! parallelization strategy enables it to scale to large pangenome graphs while maintaining biological meaningfulness in the resulting layout.
+
+\end{document}

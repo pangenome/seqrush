@@ -6,6 +6,8 @@ pub mod bidirected_ops;
 pub mod bidirected_union_find;
 // Old topological sort implementations removed - using exact ODGI implementation in bidirected_ops.rs
 pub mod cigar_analysis;
+pub mod linear_sgd;
+pub mod simple_sgd;
 pub mod embedded_builder;
 pub mod embedded_graph;
 pub mod graph_compaction;

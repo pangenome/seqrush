@@ -100,6 +100,10 @@ pub struct Args {
     /// Apply ODGI-style grooming with traversal-based node reordering
     #[arg(long = "odgi-groom", default_value = "false")]
     pub odgi_style_groom: bool,
+
+    /// Apply path-guided SGD sorting (like odgi sort -p Ygs)
+    #[arg(long = "sgd-sort", default_value = "false")]
+    pub sgd_sort: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -929,6 +933,8 @@ impl SeqRush {
             args.sort_groom_sort,
             args.iterative_groom,
             args.odgi_style_groom,
+            args.sgd_sort,
+            args.threads,
             verbose,
         )
     }

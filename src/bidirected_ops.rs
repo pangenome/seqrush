@@ -3,6 +3,7 @@ use crate::graph_ops::{Edge, Graph, Node};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// A bidirected graph that extends the basic Graph with orientation support
+#[derive(Clone)]
 pub struct BidirectedGraph {
     pub nodes: HashMap<usize, BiNode>,
     pub edges: HashSet<BiEdge>,
@@ -67,28 +68,36 @@ impl BidirectedGraph {
     pub fn compact(&mut self) {
         let mut compacted = true;
         let mut iteration = 0;
-        
+
+        // Validate before compaction
+        self.validate_graph_consistency("before compaction");
+
         // Keep compacting until no more changes
         while compacted {
             compacted = false;
             iteration += 1;
-            
+
             // Find simple components (linear chains)
             let components = self.find_simple_components();
-            
+
             // Merge each component
             for component in components {
                 if component.len() >= 2 {
                     if self.merge_component_v2(&component) {
                         compacted = true;
+                        // Validate after each merge
+                        self.validate_graph_consistency(&format!("after merge in iteration {}", iteration));
                     }
                 }
             }
-            
+
             if !compacted {
                 break;
             }
         }
+
+        // Final validation
+        self.validate_graph_consistency("after compaction");
     }
 
     /// Find simple components (linear chains that can be merged)
@@ -394,61 +403,61 @@ impl BidirectedGraph {
         // Update edges
         let first_handle = handles[0];
         let last_handle = handles[handles.len() - 1];
-        
-        // Find edges that connect to the chain
+
+        // Build set of all node IDs being merged for quick lookup
+        let merged_node_ids: std::collections::HashSet<usize> =
+            handles.iter().map(|h| h.node_id()).collect();
+
+        // Build new edge set
         let mut new_edges = std::collections::HashSet::new();
+
         for edge in &self.edges {
-            let mut skip = false;
-            
-            // Check if this edge is internal to the chain
-            for &h in handles {
-                if edge.from.node_id() == h.node_id() || edge.to.node_id() == h.node_id() {
-                    skip = true;
-                    break;
+            let from_in_chain = merged_node_ids.contains(&edge.from.node_id());
+            let to_in_chain = merged_node_ids.contains(&edge.to.node_id());
+
+            if from_in_chain && to_in_chain {
+                // Both ends are in the chain - this is an internal edge, skip it
+                continue;
+            } else if !from_in_chain && !to_in_chain {
+                // Neither end is in the chain - keep edge as-is
+                new_edges.insert(edge.clone());
+            } else if from_in_chain && !to_in_chain {
+                // Edge goes FROM a node in the chain TO outside
+                // Check if it's from the last handle of the forward chain
+                if edge.from == last_handle {
+                    new_edges.insert(BiEdge {
+                        from: new_handle_forward,
+                        to: edge.to,
+                    });
+                }
+                // Check if it's from the first handle of the reverse chain
+                let first_rev = first_handle.flip();
+                if edge.from == first_rev {
+                    new_edges.insert(BiEdge {
+                        from: new_handle_reverse,
+                        to: edge.to,
+                    });
+                }
+            } else {
+                // Edge goes FROM outside TO a node in the chain
+                // Check if it's to the first handle of the forward chain
+                if edge.to == first_handle {
+                    new_edges.insert(BiEdge {
+                        from: edge.from,
+                        to: new_handle_forward,
+                    });
+                }
+                // Check if it's to the last handle of the reverse chain
+                let last_rev = last_handle.flip();
+                if edge.to == last_rev {
+                    new_edges.insert(BiEdge {
+                        from: edge.from,
+                        to: new_handle_reverse,
+                    });
                 }
             }
-            
-            if !skip {
-                new_edges.insert(edge.clone());
-            }
         }
-        
-        // Add edges from predecessors to the new node
-        for edge in &self.edges {
-            if edge.to == first_handle {
-                new_edges.insert(BiEdge {
-                    from: edge.from,
-                    to: new_handle_forward,
-                });
-            }
-            // Handle reverse orientation
-            let last_rev = last_handle.flip();
-            if edge.from == last_rev {
-                new_edges.insert(BiEdge {
-                    from: new_handle_reverse,
-                    to: edge.to,
-                });
-            }
-        }
-        
-        // Add edges from the new node to successors
-        for edge in &self.edges {
-            if edge.from == last_handle {
-                new_edges.insert(BiEdge {
-                    from: new_handle_forward,
-                    to: edge.to,
-                });
-            }
-            // Handle reverse orientation
-            let first_rev = first_handle.flip();
-            if edge.to == first_rev {
-                new_edges.insert(BiEdge {
-                    from: edge.from,
-                    to: new_handle_reverse,
-                });
-            }
-        }
-        
+
         self.edges = new_edges;
         
         // Remove old nodes
@@ -667,6 +676,30 @@ impl BidirectedGraph {
         }
     }
 
+    /// Get the paths that pass through a given node
+    pub fn paths_through_node(&self, node_id: usize) -> Vec<usize> {
+        let mut paths_with_node = Vec::new();
+        for (path_idx, path) in self.paths.iter().enumerate() {
+            for handle in &path.steps {
+                if handle.node_id() == node_id {
+                    paths_with_node.push(path_idx);
+                    break;  // Only need to add each path once
+                }
+            }
+        }
+        paths_with_node
+    }
+
+    /// Get total sequence length in the graph
+    pub fn total_sequence_length(&self) -> usize {
+        self.nodes.values().map(|node| node.sequence.len()).sum()
+    }
+
+    /// Get the number of nodes in the graph
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     /// Convert from the old Graph format to BidirectedGraph
     pub fn from_graph(graph: Graph) -> Self {
         let mut bi_graph = BidirectedGraph::new();
@@ -745,7 +778,17 @@ impl BidirectedGraph {
 
     /// Add an edge to the graph
     pub fn add_edge(&mut self, from: Handle, to: Handle) {
-        self.edges.insert(BiEdge::new(from, to));
+        let edge = BiEdge::new(from, to);
+
+        // Check if the complement edge already exists
+        // The complement of A+ -> B+ is B- -> A-
+        let complement = BiEdge::new(to.flip(), from.flip());
+
+        // Only add the edge if neither it nor its complement is already present
+        if !self.edges.contains(&edge) && !self.edges.contains(&complement) {
+            // Add the edge as-is (not in canonical form which might flip node IDs incorrectly)
+            self.edges.insert(edge);
+        }
     }
 
     /// Get sequence for a handle (forward or reverse complement)
@@ -755,27 +798,39 @@ impl BidirectedGraph {
             .map(|node| node.get_sequence(handle.is_reverse()))
     }
 
-    /// Check if an edge exists
+    /// Check if an edge exists (checking both the edge and its complement)
     pub fn has_edge(&self, from: Handle, to: Handle) -> bool {
-        self.edges.contains(&BiEdge::new(from, to))
+        let edge = BiEdge::new(from, to);
+        let complement = BiEdge::new(to.flip(), from.flip());
+        self.edges.contains(&edge) || self.edges.contains(&complement)
     }
 
     /// Get all edges from a handle
     pub fn edges_from(&self, handle: Handle) -> Vec<Handle> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.from == handle)
-            .map(|edge| edge.to)
-            .collect()
+        let mut result = Vec::new();
+        for edge in &self.edges {
+            if edge.from == handle {
+                result.push(edge.to);
+            } else if edge.to.flip() == handle {
+                // This edge's complement has handle as from
+                result.push(edge.from.flip());
+            }
+        }
+        result
     }
 
     /// Get all edges to a handle
     pub fn edges_to(&self, handle: Handle) -> Vec<Handle> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.to == handle)
-            .map(|edge| edge.from)
-            .collect()
+        let mut result = Vec::new();
+        for edge in &self.edges {
+            if edge.to == handle {
+                result.push(edge.from);
+            } else if edge.from.flip() == handle {
+                // This edge's complement has handle as to
+                result.push(edge.to.flip());
+            }
+        }
+        result
     }
 
     /// Build a path from a sequence of node IDs with orientations
@@ -838,20 +893,59 @@ impl BidirectedGraph {
         Ok(())
     }
     
+    /// Validate graph consistency - check that all edges reference existing nodes and paths are valid
+    pub fn validate_graph_consistency(&self, phase: &str) -> bool {
+        let mut errors = Vec::new();
+
+        // Check all edges reference existing nodes
+        for edge in &self.edges {
+            if !self.nodes.contains_key(&edge.from.node_id()) {
+                errors.push(format!("Edge references non-existent node: {} (from)", edge.from.node_id()));
+            }
+            if !self.nodes.contains_key(&edge.to.node_id()) {
+                errors.push(format!("Edge references non-existent node: {} (to)", edge.to.node_id()));
+            }
+        }
+
+        // Check all path steps reference existing nodes
+        for path in &self.paths {
+            for handle in &path.steps {
+                if !self.nodes.contains_key(&handle.node_id()) {
+                    errors.push(format!("Path {} references non-existent node: {}", path.name, handle.node_id()));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            eprintln!("\n[ERROR] Graph validation failed at phase: {}", phase);
+            for error in errors.iter().take(10) {
+                eprintln!("  {}", error);
+            }
+            if errors.len() > 10 {
+                eprintln!("  ... and {} more errors", errors.len() - 10);
+            }
+            false
+        } else {
+            true
+        }
+    }
+
     /// Verify that all edges needed for paths exist in the graph
     pub fn verify_path_edges(&mut self, verbose: bool) {
         let mut missing_edges = Vec::new();
         let mut added_edges = 0;
-        
+
         for path in &self.paths {
             for i in 0..path.steps.len().saturating_sub(1) {
                 let from = path.steps[i];
                 let to = path.steps[i + 1];
                 let edge = BiEdge::new(from, to);
-                
-                if !self.edges.contains(&edge) {
+                let complement = BiEdge::new(to.flip(), from.flip());
+
+                // Check if neither the edge nor its complement exists
+                if !self.edges.contains(&edge) && !self.edges.contains(&complement) {
                     missing_edges.push((path.name.clone(), from, to));
-                    // Add the missing edge
+                    // Add the missing edge as-is (not in canonical form)
                     self.edges.insert(edge);
                     added_edges += 1;
                 }

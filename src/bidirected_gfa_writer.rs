@@ -1,8 +1,11 @@
 /// Write BidirectedGraph directly to GFA without HashGraph conversion
 
 use crate::bidirected_ops::BidirectedGraph;
+use crate::bidirected_graph::Handle;
+use crate::linear_sgd::LinearSGD;
 use crate::seqrush::SeqRush;
 use std::io::Write;
+use std::sync::Arc;
 
 impl SeqRush {
     /// Write BidirectedGraph directly to GFA
@@ -15,17 +18,23 @@ impl SeqRush {
         sort_groom_sort: bool,
         iterative_groom: Option<usize>,
         odgi_style_groom: bool,
+        sgd_sort: bool,
+        threads: usize,
         verbose: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Build the BidirectedGraph
+        // When using SGD, skip initial topological sort since SGD will provide the ordering
+        let should_sort_initially = !no_sort && !sgd_sort;
         if verbose {
-            if no_sort {
+            if sgd_sort {
+                eprintln!("[bidirected_gfa] Building BidirectedGraph without initial sorting (SGD will sort)...");
+            } else if no_sort {
                 eprintln!("[bidirected_gfa] Building BidirectedGraph without sorting...");
             } else {
                 eprintln!("[bidirected_gfa] Building BidirectedGraph with exact ODGI sort...");
             }
         }
-        let mut bi_graph = self.build_bidirected_graph_with_options(verbose, !no_sort)?;
+        let mut bi_graph = self.build_bidirected_graph_with_options(verbose, should_sort_initially)?;
         
         if verbose {
             eprintln!("[bidirected_gfa] BidirectedGraph has {} nodes (sorted)", bi_graph.nodes.len());
@@ -34,7 +43,56 @@ impl SeqRush {
         }
         
         // Apply grooming and/or sorting strategies
-        if let Some(max_iterations) = iterative_groom {
+        if sgd_sort {
+            // Path-guided SGD sorting (like odgi sort -p Ygs)
+            if verbose {
+                eprintln!("[bidirected_gfa] Using path-guided SGD sorting (like odgi sort -p Ygs)");
+                eprintln!("[bidirected_gfa] Graph has {} nodes before SGD", bi_graph.nodes.len());
+            }
+
+            // Only apply SGD if we have nodes
+            if !bi_graph.nodes.is_empty() {
+                // Run path-guided SGD (like ODGI)
+                let sgd = LinearSGD::new(
+                    Arc::new(bi_graph.clone()),
+                    0,        // bandwidth (not used)
+                    0.0,      // sampling_rate (not used)
+                    true,     // use_paths
+                    100,      // t_max (more iterations for better convergence)
+                    0.01,     // eps (ODGI default)
+                    0.001,    // delta (tighter convergence)
+                    threads,  // threads
+                );
+
+                let order = sgd.get_order();
+
+                if verbose {
+                    eprintln!("[bidirected_gfa] SGD produced ordering of {} nodes", order.len());
+                }
+
+                // Convert to forward handles only for node ordering
+                let forward_order: Vec<Handle> = order.iter()
+                    .map(|h| Handle::new(h.node_id(), false))
+                    .collect();
+
+                // Apply the SGD ordering
+                bi_graph.apply_ordering(forward_order, verbose);
+
+                // Then apply grooming (degroom) - only flip orientations, don't reorder!
+                if verbose {
+                    eprintln!("[bidirected_gfa] Applying grooming (orientation flips only) after SGD...");
+                }
+                let groomed_order = bi_graph.groom(true, false);
+                bi_graph.apply_grooming_with_reorder(groomed_order, false, false);
+
+                // NO topological sort after SGD! That would destroy the SGD ordering
+            } else {
+                if verbose {
+                    eprintln!("[bidirected_gfa] Skipping SGD - no nodes in graph yet");
+                }
+            }
+
+        } else if let Some(max_iterations) = iterative_groom {
             // Iterative grooming
             if verbose {
                 eprintln!("[bidirected_gfa] Using iterative grooming (max {} iterations)", max_iterations);
@@ -78,7 +136,12 @@ impl SeqRush {
                 bi_graph.verify_path_edges(verbose);
 
                 // Re-apply sorting/grooming after compaction to fix node numbering
-                if sort_groom_sort {
+                if sgd_sort {
+                    // For SGD, only re-apply grooming, not sorting (preserve SGD order)
+                    eprintln!("[bidirected_gfa] Re-applying grooming after compaction (preserving SGD order)...");
+                    let groomed_order = bi_graph.groom(true, false);
+                    bi_graph.apply_grooming_with_reorder(groomed_order, false, false);
+                } else if sort_groom_sort {
                     eprintln!("[bidirected_gfa] Re-applying sort-groom-sort after compaction...");
                     bi_graph.sort_groom_sort(false);
                 } else if odgi_style_groom {
@@ -100,7 +163,11 @@ impl SeqRush {
                 bi_graph.verify_path_edges(false);
 
                 // Re-apply sorting/grooming after compaction
-                if sort_groom_sort {
+                if sgd_sort {
+                    // For SGD, only re-apply grooming, not sorting (preserve SGD order)
+                    let groomed_order = bi_graph.groom(true, false);
+                    bi_graph.apply_grooming_with_reorder(groomed_order, false, false);
+                } else if sort_groom_sort {
                     bi_graph.sort_groom_sort(false);
                 } else if odgi_style_groom {
                     let groomed_order = bi_graph.groom(true, false);

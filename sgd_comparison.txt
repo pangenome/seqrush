@@ -1,0 +1,50 @@
+Comparing test_nosort.gfa vs test_sgd.gfa
+
+=== test_nosort.gfa ===
+Total edges: 6964
+Mean distance: 90.92
+Median distance: 1.0
+Std deviation: 465.83
+Min distance: 0
+Max distance: 3416
+
+Percentiles:
+  25th: 1.0
+  50th (median): 1.0
+  75th: 1.0
+  90th: 1.0
+  95th: 11.0
+  99th: 3013.2
+
+Locality metrics:
+  Local edges (distance=1): 94.7%
+  Nearby edges (distance≤10): 95.0%
+
+=== test_sgd.gfa ===
+Total edges: 6964
+Mean distance: 5.34
+Median distance: 1.0
+Std deviation: 108.33
+Min distance: 0
+Max distance: 3430
+
+Percentiles:
+  25th: 1.0
+  50th (median): 1.0
+  75th: 1.0
+  90th: 1.0
+  95th: 2.0
+  99th: 3.0
+
+Locality metrics:
+  Local edges (distance=1): 93.0%
+  Nearby edges (distance≤10): 99.7%
+
+=== Comparison ===
+Mean distance reduction: 85.58 (94.1%)
+Median distance reduction: 0.0 (0.0%)
+Max distance reduction: -14
+Local edge improvement: -1.7 percentage points
+Nearby edge improvement: 4.8 percentage points
+
+Comparison plot saved to edge_distance_comparison.png
