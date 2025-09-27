@@ -2,10 +2,9 @@
 
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::Handle;
-use crate::linear_sgd::LinearSGD;
+use crate::path_sgd::{path_sgd_sort, PathSGDParams};
 use crate::seqrush::SeqRush;
 use std::io::Write;
-use std::sync::Arc;
 
 impl SeqRush {
     /// Write BidirectedGraph directly to GFA
@@ -52,26 +51,23 @@ impl SeqRush {
 
             // Only apply SGD if we have nodes
             if !bi_graph.nodes.is_empty() {
-                // Run path-guided SGD (like ODGI)
-                let sgd = LinearSGD::new(
-                    Arc::new(bi_graph.clone()),
-                    0,        // bandwidth (not used)
-                    0.0,      // sampling_rate (not used)
-                    true,     // use_paths
-                    100,      // t_max (more iterations for better convergence)
-                    0.01,     // eps (ODGI default)
-                    0.001,    // delta (tighter convergence)
-                    threads,  // threads
-                );
-
-                let order = sgd.get_order();
+                // Run exact ODGI path-guided SGD with same parameters as odgi sort -p Ygs
+                let mut params = PathSGDParams::default();
+                params.nthreads = threads;
+                params.progress = verbose;
 
                 if verbose {
-                    eprintln!("[bidirected_gfa] SGD produced ordering of {} nodes", order.len());
+                    eprintln!("[bidirected_gfa] Running exact ODGI path_linear_sgd with {} iterations", params.iter_max);
+                }
+
+                let sorted_handles = path_sgd_sort(&bi_graph, params);
+
+                if verbose {
+                    eprintln!("[bidirected_gfa] Path SGD produced ordering of {} nodes", sorted_handles.len());
                 }
 
                 // Convert to forward handles only for node ordering
-                let forward_order: Vec<Handle> = order.iter()
+                let forward_order: Vec<Handle> = sorted_handles.iter()
                     .map(|h| Handle::new(h.node_id(), false))
                     .collect();
 

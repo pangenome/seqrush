@@ -8,6 +8,7 @@ pub mod bidirected_union_find;
 pub mod cigar_analysis;
 pub mod linear_sgd;
 pub mod simple_sgd;
+pub mod path_sgd;
 pub mod embedded_builder;
 pub mod embedded_graph;
 pub mod graph_compaction;
