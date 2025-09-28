@@ -2,7 +2,7 @@
 
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::Handle;
-use crate::path_sgd::{path_sgd_sort, PathSGDParams};
+use crate::path_sgd_exact::{path_sgd_sort, PathSGDParams};
 use crate::seqrush::SeqRush;
 use std::io::Write;
 

@@ -248,10 +248,10 @@ mod reverse_complement_tests {
             let has_reverse = rc_path.iter().any(|(_, orient)| *orient == '-');
             println!("seq3_rc path has reverse orientations: {}", has_reverse);
 
-            // Currently expecting no reverse orientations due to the bug
+            // We now properly support bidirected graphs with reverse orientations!
             assert!(
-                !has_reverse,
-                "Current implementation doesn't support reverse orientations in paths"
+                has_reverse,
+                "seq3_rc should have reverse orientations since we now support bidirected graphs"
             );
         }
 
