@@ -65,6 +65,24 @@ impl BidirectedGraph {
     }
 
     /// Compact the graph by merging linear chains of nodes
+    /// Renumber nodes to be sequential starting from 1
+    pub fn renumber_nodes_sequentially(&mut self) {
+        let mut old_to_new: HashMap<usize, usize> = HashMap::new();
+        let mut new_id = 1;
+
+        // Create mapping from old to new IDs
+        let mut old_ids: Vec<usize> = self.nodes.keys().cloned().collect();
+        old_ids.sort();
+
+        for old_id in old_ids {
+            old_to_new.insert(old_id, new_id);
+            new_id += 1;
+        }
+
+        // Apply the renumbering
+        self.apply_node_id_mapping(&old_to_new);
+    }
+
     pub fn compact(&mut self) {
         let mut compacted = true;
         let mut iteration = 0;

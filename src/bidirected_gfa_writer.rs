@@ -128,6 +128,9 @@ impl SeqRush {
                 let nodes_after = bi_graph.nodes.len();
                 eprintln!("[bidirected_gfa] Compacted from {} to {} nodes", nodes_before, nodes_after);
 
+                // Renumber nodes to be sequential for ODGI compatibility
+                bi_graph.renumber_nodes_sequentially();
+
                 // Verify edges after compaction
                 bi_graph.verify_path_edges(verbose);
 
@@ -156,6 +159,7 @@ impl SeqRush {
                 bi_graph.verify_path_edges(verbose);
             } else {
                 bi_graph.compact();
+                bi_graph.renumber_nodes_sequentially();
                 bi_graph.verify_path_edges(false);
 
                 // Re-apply sorting/grooming after compaction
