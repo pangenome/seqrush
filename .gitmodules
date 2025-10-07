@@ -1,6 +1,9 @@
 [submodule "HLA-zoo"]
 	path = HLA-zoo
 	url = https://github.com/ekg/HLA-zoo.git
+[submodule "pafcheck"]
+	path = pafcheck
+	url = https://github.com/ekg/pafcheck.git
 [submodule "allwave"]
 	path = allwave
 	url = https://github.com/pangenome/allwave.git
