@@ -2,6 +2,7 @@ use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_union_find::BidirectedUnionFind;
 use crate::graph_ops::{Edge, Graph, Node};
 use crate::pos::{make_pos, Pos};
+#[cfg(feature = "use-allwave")]
 use allwave::{AlignmentParams, AllPairIterator, SparsificationStrategy};
 use clap::Parser;
 use rayon::prelude::*;
@@ -102,6 +103,10 @@ pub struct Args {
     /// Apply path-guided SGD sorting (like odgi sort -p Ygs)
     #[arg(long = "sgd-sort", default_value = "false")]
     pub sgd_sort: bool,
+
+    /// Aligner to use: 'allwave' or 'sweepga' (default: sweepga)
+    #[arg(long = "aligner", default_value = "sweepga")]
+    pub aligner: String,
 }
 
 #[derive(Clone, Debug)]
@@ -309,8 +314,23 @@ impl SeqRush {
             // Read alignments from PAF file
             self.align_and_unite_from_paf(paf_path, args);
         } else {
-            // Use the new allwave-based implementation
-            self.align_and_unite_with_allwave(args);
+            // Use the configured aligner backend based on CLI argument
+            match args.aligner.as_str() {
+                #[cfg(feature = "use-allwave")]
+                "allwave" => self.align_and_unite_with_allwave(args),
+
+                #[cfg(feature = "use-sweepga")]
+                "sweepga" => self.align_and_unite_with_sweepga(args),
+
+                _ => {
+                    eprintln!("Error: Unknown aligner '{}'. Available aligners:", args.aligner);
+                    #[cfg(feature = "use-allwave")]
+                    eprintln!("  - allwave");
+                    #[cfg(feature = "use-sweepga")]
+                    eprintln!("  - sweepga");
+                    std::process::exit(1);
+                }
+            }
         }
     }
 
@@ -411,6 +431,7 @@ impl SeqRush {
         }
     }
 
+    #[cfg(feature = "use-allwave")]
     pub fn align_and_unite_with_allwave(&self, args: &Args) {
         // Parse alignment scores
         let scores = match AlignmentScores::parse(&args.scores) {
@@ -558,6 +579,63 @@ impl SeqRush {
                 args.verbose,
             );
         });
+    }
+
+    #[cfg(feature = "use-sweepga")]
+    pub fn align_and_unite_with_sweepga(&self, args: &Args) {
+        use fastga_rs::{Config, FastGA};
+        use std::path::Path;
+        use tempfile::NamedTempFile;
+
+        if args.verbose {
+            println!("Using sweepga aligner");
+        }
+
+        // Get input FASTA path
+        let fasta_path = Path::new(&args.sequences);
+
+        // Create FastGA instance
+        let mut config_builder = Config::builder()
+            .num_threads(args.threads)
+            .verbose(args.verbose);
+
+        let config = config_builder.build();
+        let fastga = match FastGA::new(config) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create FastGA: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        // Run alignment directly on the input file
+        if args.verbose {
+            println!("Running FastGA alignment on {}...", fasta_path.display());
+        }
+
+        // Create temp PAF file
+        let paf_temp = match NamedTempFile::new() {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create temp file: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let num_alignments = match fastga.align_to_file(fasta_path, fasta_path, paf_temp.path()) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("FastGA alignment failed: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        if args.verbose {
+            println!("FastGA produced {} alignments", num_alignments);
+        }
+
+        // Now process the PAF using existing align_and_unite_from_paf
+        self.align_and_unite_from_paf(paf_temp.path().to_str().unwrap(), args);
     }
 
     fn process_alignment(
