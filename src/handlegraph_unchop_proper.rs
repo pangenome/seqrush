@@ -3,7 +3,7 @@ use handlegraph::handlegraph::{HandleGraph, IntoEdges, IntoHandles, IntoSequence
 use handlegraph::hashgraph::HashGraph;
 use handlegraph::mutablehandlegraph::AdditiveHandleGraph;
 use handlegraph::pathhandlegraph::embedded_paths::{
-    GraphPathNames, GraphPaths, GraphPathsRef, IntoPathIds, MutableGraphPaths,
+    GraphPathNames, GraphPathsRef, IntoPathIds, MutableGraphPaths,
 };
 use handlegraph::pathhandlegraph::path::PathSteps;
 use std::collections::{HashMap, HashSet};

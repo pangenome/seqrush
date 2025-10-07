@@ -1,11 +1,9 @@
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_union_find::BidirectedUnionFind;
-use crate::embedded_builder::convert_to_embedded;
 use crate::graph_ops::{Edge, Graph, Node};
 use crate::pos::{make_pos, Pos};
 use allwave::{AlignmentParams, AllPairIterator, SparsificationStrategy};
 use clap::Parser;
-use handlegraph::handlegraph::{HandleGraph, IntoEdges, IntoSequences};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

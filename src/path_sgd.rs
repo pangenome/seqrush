@@ -1,6 +1,5 @@
 /// Exact implementation of ODGI's path_linear_sgd from path_sgd.cpp
 /// This is the algorithm used by `odgi sort -p Ygs`
-
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::Handle;
 use rand::distributions::{Distribution, Uniform};
@@ -8,7 +7,6 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
 use std::collections::HashMap;
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
-use std::sync::atomic::AtomicU64 as AtomicF64; // We'll use u64 for atomic float operations
 use std::thread;
 use std::time::Duration;
 

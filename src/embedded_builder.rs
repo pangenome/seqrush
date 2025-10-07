@@ -1,6 +1,6 @@
 use crate::bidirected_graph::Handle;
 use crate::bidirected_ops::BidirectedGraph;
-use crate::embedded_graph::{EmbeddedGraph, PathId};
+use crate::embedded_graph::EmbeddedGraph;
 use std::collections::HashMap;
 
 /// Convert a BidirectedGraph to an EmbeddedGraph

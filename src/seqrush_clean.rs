@@ -1,7 +1,6 @@
 use crate::graph_ops::{Edge, Graph, Node};
 use allwave::{AlignmentParams, AllPairIterator, SparsificationStrategy};
 use clap::Parser;
-use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};

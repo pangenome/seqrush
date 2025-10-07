@@ -1,6 +1,6 @@
 use crate::bidirected_graph::{BiEdge, BiNode, BiPath, Handle};
 use crate::graph_ops::{Edge, Graph, Node};
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// A bidirected graph that extends the basic Graph with orientation support
 #[derive(Clone)]
@@ -100,12 +100,10 @@ impl BidirectedGraph {
 
             // Merge each component
             for component in components {
-                if component.len() >= 2 {
-                    if self.merge_component_v2(&component) {
-                        compacted = true;
-                        // Validate after each merge
-                        self.validate_graph_consistency(&format!("after merge in iteration {}", iteration));
-                    }
+                if component.len() >= 2 && self.merge_component_v2(&component) {
+                    compacted = true;
+                    // Validate after each merge
+                    self.validate_graph_consistency(&format!("after merge in iteration {}", iteration));
                 }
             }
 
@@ -1052,11 +1050,9 @@ impl BidirectedGraph {
                         continue;
                     }
                     // Also check edges from this node going backward (self loops)
-                    if edge.from.node_id() == node_id && edge.from.is_reverse() {
-                        if edge.to.node_id() == node_id && !edge.to.is_reverse() {
-                            has_left_edges = true;
-                            break;
-                        }
+                    if edge.from.node_id() == node_id && edge.from.is_reverse() && edge.to.node_id() == node_id && !edge.to.is_reverse() {
+                        has_left_edges = true;
+                        break;
                     }
                 }
                 

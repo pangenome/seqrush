@@ -1,3 +1,9 @@
+// Allow clippy warnings during active development
+#![allow(clippy::all)]
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+
 pub mod bidirected_builder;
 pub mod bidirected_compaction;
 pub mod bidirected_gfa_writer;
