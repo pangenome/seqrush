@@ -126,7 +126,8 @@ impl SeqRush {
         let aligner = AllPairIterator::with_options(
             &allwave_sequences,
             params,
-            true, // exclude self
+            true,  // exclude self
+            false, // use_mash_orientation
             SparsificationStrategy::None,
         )
         .with_orientation_params(orientation_params);

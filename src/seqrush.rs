@@ -506,7 +506,8 @@ impl SeqRush {
             let paf_aligner = AllPairIterator::with_options(
                 &allwave_sequences,
                 params.clone(),
-                false,                        // include self-alignments
+                false, // include self-alignments
+                false, // use_mash_orientation
                 SparsificationStrategy::None, // No sparsification for PAF
             )
             .with_orientation_params(orientation_params.clone());
@@ -539,6 +540,7 @@ impl SeqRush {
             &allwave_sequences,
             params,
             false, // include self-alignments
+            false, // use_mash_orientation
             sparsification,
         )
         .with_orientation_params(orientation_params);

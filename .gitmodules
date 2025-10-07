@@ -7,9 +7,6 @@
 [submodule "allwave"]
 	path = allwave
 	url = https://github.com/pangenome/allwave.git
-[submodule "lib_wfa2"]
-	path = lib_wfa2
-	url = https://github.com/ekg/lib_wfa2.git
 [submodule "WFA2-lib"]
 	path = WFA2-lib
 	url = https://github.com/smarco/WFA2-lib.git

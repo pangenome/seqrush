@@ -60,8 +60,8 @@ debug-bins = []
 
 [dependencies]
 # Use local path dependencies to avoid network fetch during tests
-lib_wfa2 = { path = "lib_wfa2" }
 allwave = { path = "allwave" }
+lib_wfa2 = { git = "https://github.com/ekg/lib_wfa2", rev = "819b82cd842aabedcb962fd5b82380fe454234f6" }
 union-find = "0.3"
 uf_rush = "0.2"
 rayon = "1.7"
