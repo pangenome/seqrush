@@ -1,10 +1,7 @@
 /// Write BidirectedGraph directly to GFA without HashGraph conversion
-
-use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::Handle;
 use crate::path_sgd_exact::{path_sgd_sort, PathSGDParams};
 use crate::seqrush::SeqRush;
-use std::io::Write;
 
 impl SeqRush {
     /// Write BidirectedGraph directly to GFA
@@ -82,10 +79,8 @@ impl SeqRush {
                 bi_graph.apply_grooming_with_reorder(groomed_order, false, false);
 
                 // NO topological sort after SGD! That would destroy the SGD ordering
-            } else {
-                if verbose {
-                    eprintln!("[bidirected_gfa] Skipping SGD - no nodes in graph yet");
-                }
+            } else if verbose {
+                eprintln!("[bidirected_gfa] Skipping SGD - no nodes in graph yet");
             }
 
         } else if let Some(max_iterations) = iterative_groom {

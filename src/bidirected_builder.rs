@@ -1,7 +1,7 @@
-use crate::bidirected_graph::{BiEdge, Handle};
+use crate::bidirected_graph::Handle;
 use crate::bidirected_ops::BidirectedGraph;
 use crate::graph_ops::{Edge, Graph, Node};
-use crate::pos::{is_rev, make_pos, offset, Pos};
+use crate::pos::{make_pos, offset, Pos};
 use crate::seqrush::{SeqRush, Sequence};
 use std::collections::HashMap;
 

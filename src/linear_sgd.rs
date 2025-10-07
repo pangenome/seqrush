@@ -1,10 +1,9 @@
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::Handle;
 use rand::distributions::{Distribution, Uniform};
-use rand::{thread_rng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::sync::atomic::AtomicU64 as AtomicF64; // We'll use u64 for atomic float operations
 use std::thread;
 use std::time::Duration;

@@ -1,6 +1,5 @@
 /// Exact line-by-line port of ODGI's path_linear_sgd from path_sgd.cpp
 /// This is a direct translation maintaining all original logic and structure
-
 use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_graph::Handle;
 use rand::Rng;

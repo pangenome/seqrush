@@ -2,7 +2,6 @@
 /// by exploring from the orientation supported by the most paths.
 ///
 /// Based on ODGI's grooming algorithm
-
 use crate::bidirected_graph::Handle;
 use crate::bidirected_ops::BidirectedGraph;
 use std::collections::{HashSet, VecDeque};
