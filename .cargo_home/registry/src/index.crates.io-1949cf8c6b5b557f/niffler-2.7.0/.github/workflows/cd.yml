@@ -1,0 +1,31 @@
+name: Continuous Deployment
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Make sure we can publish the niffler crate
+        run: |
+          cargo publish --dry-run --manifest-path ./Cargo.toml
+
+      # Login to crates.io on tags
+      - name: login to crates.io
+        run: |
+          cargo login ${{ secrets.CRATES_IO_TOKEN }}
+
+      # Publish to crates.io on tags
+      - name: Publish to crates.io
+        run: |
+          cargo publish --manifest-path ./Cargo.toml

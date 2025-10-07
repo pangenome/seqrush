@@ -1,0 +1,10 @@
+target/**
+.vscode/**
+wrapper.h
+src/bindings.rs
+Runs
+Cargo.lock
+rls*
+.idea/
+*.pdf
+*.html

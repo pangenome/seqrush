@@ -1,0 +1,11 @@
+error: Rhai functions cannot return references
+  --> ui_tests/return_mut_ref.rs:14:38
+   |
+14 | pub fn test_fn(input: &mut Clonable) -> &mut bool {
+   |                                      ^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> ui_tests/return_mut_ref.rs:25:8
+   |
+25 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

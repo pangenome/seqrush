@@ -1,0 +1,11 @@
+error: expecting identifier
+  --> ui_tests/export_fn_junk_arg.rs:10:13
+   |
+10 | #[export_fn("wheeeee")]
+   |             ^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> ui_tests/export_fn_junk_arg.rs:17:8
+   |
+17 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

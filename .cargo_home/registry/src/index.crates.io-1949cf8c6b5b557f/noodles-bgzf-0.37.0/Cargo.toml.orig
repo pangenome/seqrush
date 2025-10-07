@@ -1,0 +1,42 @@
+[package]
+name = "noodles-bgzf"
+version = "0.37.0"
+authors = ["Michael Macias <zaeleus@gmail.com>"]
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Blocked gzip format (BGZF) reader and writer"
+homepage = "https://github.com/zaeleus/noodles"
+repository = "https://github.com/zaeleus/noodles"
+documentation = "https://docs.rs/noodles-bgzf"
+
+[features]
+async = ["dep:futures", "dep:pin-project-lite", "dep:tokio", "dep:tokio-util"]
+libdeflate = ["dep:libdeflater"]
+
+[dependencies]
+byteorder.workspace = true
+bytes.workspace = true
+crossbeam-channel = "0.5.6"
+flate2.workspace = true
+
+futures = { workspace = true, optional = true, features = ["std"] }
+pin-project-lite = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["fs", "io-util", "rt"] }
+tokio-util = { version = "0.7.0", optional = true, features = ["codec"] }
+
+libdeflater = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-std", "macros", "rt-multi-thread"] }
+
+[package.metadata.docs.rs]
+features = ["async"]
+
+[[example]]
+name = "bgzf_read_async"
+required-features = ["async"]
+
+[[example]]
+name = "bgzf_write_async"
+required-features = ["async"]

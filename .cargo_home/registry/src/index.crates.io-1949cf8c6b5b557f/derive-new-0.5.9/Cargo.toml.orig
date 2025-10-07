@@ -1,0 +1,22 @@
+[package]
+name = "derive-new"
+version = "0.5.9"
+authors = ["Nick Cameron <ncameron@mozilla.com>"]
+description = "`#[derive(new)]` implements simple constructor functions for structs and enums."
+license = "MIT"
+repository = "https://github.com/nrc/derive-new"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = "1"
+
+[features]
+default = ["std"]
+std = []
+
+[workspace]
+members = ["testcrate"]

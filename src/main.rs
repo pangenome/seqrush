@@ -1,5 +1,5 @@
 use clap::Parser;
-use seqrush::seqrush::{Args, run_seqrush};
+use seqrush::seqrush::{run_seqrush, Args};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();

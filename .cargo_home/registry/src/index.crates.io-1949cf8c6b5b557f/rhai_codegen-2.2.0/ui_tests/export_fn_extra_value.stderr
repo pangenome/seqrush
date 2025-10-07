@@ -1,0 +1,11 @@
+error: extraneous value
+  --> ui_tests/export_fn_extra_value.rs:10:26
+   |
+10 | #[export_fn(return_raw = "yes")]
+   |                          ^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> ui_tests/export_fn_extra_value.rs:17:8
+   |
+17 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

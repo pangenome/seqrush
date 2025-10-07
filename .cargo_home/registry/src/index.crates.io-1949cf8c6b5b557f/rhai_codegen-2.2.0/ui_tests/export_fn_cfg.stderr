@@ -1,0 +1,11 @@
+error: `cfg` attributes are not allowed for `export_fn`
+  --> ui_tests/export_fn_cfg.rs:10:1
+   |
+10 | #[cfg(not(feature = "foo"))]
+   | ^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> ui_tests/export_fn_cfg.rs:18:8
+   |
+18 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

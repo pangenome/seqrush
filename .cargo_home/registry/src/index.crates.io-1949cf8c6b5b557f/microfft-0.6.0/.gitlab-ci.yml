@@ -1,0 +1,47 @@
+stages:
+  - test
+
+rust-msrv:
+  stage: test
+  image: rust:1.61.0
+  script:
+    - rustc --version && cargo --version
+    - cargo clean
+    - cargo test --release --verbose
+
+rust-latest:
+  stage: test
+  image: rust:latest
+  script:
+    - rustc --version && cargo --version
+    - cargo clean
+    - cargo test --verbose
+
+rust-nightly:
+  stage: test
+  image: rustlang/rust:nightly
+  script:
+    - rustc --version && cargo --version
+    - cargo clean
+    - cargo test --verbose
+  allow_failure: true
+
+coverage:
+  stage: test
+  image: rust:latest
+  script:
+    - rustc --version && cargo --version
+    - cargo install cargo-tarpaulin -f
+    - cargo clean
+    - cargo tarpaulin --out xml --out html --verbose
+  artifacts:
+    when: always
+    paths:
+      - cobertura.xml
+      - tarpaulin-report.html
+      - target/tarpaulin
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: cobertura.xml
+  coverage: '/^\d+.\d+% coverage/'

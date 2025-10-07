@@ -1,0 +1,25 @@
+[package]
+name = "fasteval"
+version = "0.2.4"
+authors = ["Christopher Sebastian <christopher@likebike.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/likebike/fasteval"
+documentation = "https://docs.rs/fasteval/"
+description = """Fast evaluation of algebraic expressions"""
+keywords = ["evaluate", "math", "algebra", "calculate", "expression"]
+categories = ["mathematics", "science", "parser-implementations"]
+edition = "2018"
+
+[dependencies]
+
+[profile.bench]
+debug = true
+lto = true
+
+[features]
+default = ["alpha-keywords"]
+alpha-keywords = []  # Enable 'NaN', 'inf', 'and', 'or'
+unsafe-vars = []     # tinyexpr-style pointer-based variables.
+nightly = []         # Enable features that depend on Rust nightly.
+

@@ -1,0 +1,39 @@
+[package]
+name = "liblzma-sys"
+version = "0.3.13"
+authors = ["Alex Crichton <alex@alexcrichton.com>", "Portable-Network-Archive Developers"]
+build = "build.rs"
+links = "lzma"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["lzma", "xz", "encoding", "wasm"]
+repository = "https://github.com/portable-network-archive/liblzma-rs"
+homepage = "https://github.com/portable-network-archive/liblzma-rs"
+description = """
+Raw bindings to liblzma which contains an implementation of LZMA and xz stream
+encoding/decoding.
+
+High level Rust bindings are available in the `liblzma` crate.
+"""
+categories = ["external-ffi-bindings"]
+edition = "2021"
+exclude = ["xz/.github/", "xz/tests/files/*"]
+
+[dependencies]
+libc = "0.2.67"
+
+[build-dependencies]
+cc = { version = "1.0.49", features = ["parallel"] }
+pkg-config = "0.3.18"
+
+[features]
+default = ["bindgen"]
+static = []
+bindgen = []
+parallel = []
+wasm = ["static", "bindgen"]
+
+# These two are for cross-language LTO.
+# Will only work if `clang` is used to build the C library.
+fat-lto = [] # Enable fat-lto, will override thin-lto if specified
+thin-lto = [] # Enable thin-lto, will fall back to fat-lto if not supported

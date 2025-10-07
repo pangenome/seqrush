@@ -1,0 +1,50 @@
+Comparing test_sgd.gfa vs test_odgi_ygs.gfa
+
+=== test_sgd.gfa ===
+Total edges: 6964
+Mean distance: 5.34
+Median distance: 1.0
+Std deviation: 108.33
+Min distance: 0
+Max distance: 3430
+
+Percentiles:
+  25th: 1.0
+  50th (median): 1.0
+  75th: 1.0
+  90th: 1.0
+  95th: 2.0
+  99th: 3.0
+
+Locality metrics:
+  Local edges (distance=1): 93.0%
+  Nearby edges (distance≤10): 99.7%
+
+=== test_odgi_ygs.gfa ===
+Total edges: 3643
+Mean distance: 1.12
+Median distance: 1.0
+Std deviation: 0.55
+Min distance: 0
+Max distance: 16
+
+Percentiles:
+  25th: 1.0
+  50th (median): 1.0
+  75th: 1.0
+  90th: 1.0
+  95th: 2.0
+  99th: 3.0
+
+Locality metrics:
+  Local edges (distance=1): 90.5%
+  Nearby edges (distance≤10): 99.9%
+
+=== Comparison ===
+Mean distance reduction: 4.22 (79.0%)
+Median distance reduction: 0.0 (0.0%)
+Max distance reduction: 3414
+Local edge improvement: -2.5 percentage points
+Nearby edge improvement: 0.2 percentage points
+
+Comparison plot saved to edge_distance_comparison.png

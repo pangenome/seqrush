@@ -1,0 +1,48 @@
+[package]
+name = "libdeflater"
+version = "1.24.0"
+authors = ["Adam Kewley <contact@adamkewley.com>"]
+edition = "2018"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["gzip", "zlib", "deflate", "encoding"]
+categories = ["compression", "api-bindings"]
+repository = "https://github.com/adamkewley/libdeflater"
+homepage = "https://github.com/adamkewley/libdeflater"
+description = """
+Bindings to libdeflate for DEFLATE (de)compression exposed as non-streaming buffer
+operations. Contains bindings for raw deflate, zlib, and gzip data.
+"""
+exclude = [
+    ".git*",
+    ".travis.yml",
+    "bench_data/",
+    "examples/",
+    "scripts/",
+]
+
+[dependencies]
+libdeflate-sys = { version = "1.24.0", path = "libdeflate-sys" }
+
+[dev-dependencies]
+criterion = "0.3"
+flate2 = "1.0.11"
+adler32 = "1.2.0"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[features]
+# Makes libdeflate use Rust's allocator instead of the libc one.
+# This is useful when Rust is preconfigured to a custom global allocator
+# (e.g. pool-based, or a tracking one, or something else entirely).
+use_rust_alloc = []
+# Builds libdeflate in a freestanding mode (no reliance on libc).
+# This is useful for targets that don't have a C stdlib (e.g. wasm32-unknown-unknown).
+freestanding = ["libdeflate-sys/freestanding", "use_rust_alloc"]
+# Link to system/external libdeflate library when available, instead of
+# building it from source.
+dynamic = ["libdeflate-sys/dynamic"]
+
+[workspace]

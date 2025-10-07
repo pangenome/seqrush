@@ -1,0 +1,66 @@
+[package]
+name = "gzp"
+authors = ["Seth Stadick <sstadick@gmail.com>"]
+version = "1.0.1"
+edition = "2018"
+license = "Unlicense/MIT"
+readme = "README.md"
+documentation = "https://docs.rs/gzp"
+homepage = "https://github.com/sstadick/gzp"
+repository = "https://github.com/sstadick/gzp"
+categories = ["compression", "concurrency"]
+keywords = ["compression", "parallel", "pigz"]
+description = "Parallel Compression"
+
+[lib]
+name = "gzp"
+path = "src/lib.rs"
+bench = false
+
+[features]
+# Feature Sets
+default = ["deflate_default", "libdeflate"]
+snappy_default = [
+    "snappy",
+    "snap",
+    "deflate_rust",
+] # needs flate2 for compression type
+deflate_default = ["deflate_zlib_ng"]
+deflate_rust = ["deflate", "flate2/rust_backend"]
+deflate_zlib = [
+    "deflate",
+    "flate2/zlib",
+    "any_zlib",
+    "libz-sys",
+    "libz-sys/libc",
+]
+deflate_zlib_ng = ["deflate", "flate2/zlib-ng", "any_zlib"]
+
+# Feature flags used internally
+deflate = []
+libdeflate = ["libdeflater"]
+snappy = []
+any_zlib = ["flate2/any_zlib"]
+
+[dependencies]
+bytes = "1.10.0"
+num_cpus = "1.16.0"
+thiserror = "2.0.11"
+flume = "0.11.1"
+byteorder = "1.5.0"
+flate2 = { version = "1.0.35", default-features = false, optional = true }
+libdeflater = { version = "1.23.0", optional = true }
+libz-sys = { version = "1.1.21", default-features = false, optional = true }
+snap = { version = "1.1.1", optional = true }
+core_affinity = "0.8.2"
+libz-ng-sys = "1.1.21"
+log = "0.4.25"
+
+[dev-dependencies]
+proptest = "1.6.0"
+tempfile = "3.17.1"
+criterion = "0.5.1"
+
+[[bench]]
+name = "bench"
+harness = false

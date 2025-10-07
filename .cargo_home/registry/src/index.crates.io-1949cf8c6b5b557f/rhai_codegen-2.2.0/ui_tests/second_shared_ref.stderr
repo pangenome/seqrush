@@ -1,0 +1,11 @@
+error: function parameters other than the first one cannot be passed by reference
+  --> ui_tests/second_shared_ref.rs:13:41
+   |
+13 | pub fn test_fn(input: Clonable, factor: &bool) -> bool {
+   |                                         ^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> ui_tests/second_shared_ref.rs:24:8
+   |
+24 |     if test_fn(n, &true) {
+   |        ^^^^^^^ not found in this scope

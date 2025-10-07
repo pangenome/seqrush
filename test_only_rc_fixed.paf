@@ -1,0 +1,4 @@
+forward	15	0	15	+	forward	15	0	15	15	15	60	gi:f:1.000000	cg:Z:15=
+reverse_comp	16	0	16	-	forward	15	0	15	15	16	60	gi:f:1.000000	cg:Z:5=1I10=
+reverse_comp	16	0	16	+	reverse_comp	16	0	16	16	16	60	gi:f:1.000000	cg:Z:16=
+forward	15	0	15	-	reverse_comp	16	0	16	15	16	60	gi:f:1.000000	cg:Z:15=1D

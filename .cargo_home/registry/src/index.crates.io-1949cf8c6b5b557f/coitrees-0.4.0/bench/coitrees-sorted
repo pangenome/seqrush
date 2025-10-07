@@ -1,0 +1,4 @@
+#!/bin/sh
+
+../target/release/examples/bed-intersect --sorted $1 $2
+
