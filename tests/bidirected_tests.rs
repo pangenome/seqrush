@@ -63,6 +63,7 @@ fn test_simple_forward_sequence() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -109,6 +110,7 @@ fn test_reverse_complement_alignment() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -158,6 +160,7 @@ fn test_palindromic_sequence() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -201,6 +204,7 @@ fn test_inversion_between_sequences() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -254,6 +258,7 @@ fn test_complex_rearrangement() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -295,6 +300,7 @@ fn test_self_alignment_with_repeats() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -373,6 +379,7 @@ fn test_multiple_sequence_alignment() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

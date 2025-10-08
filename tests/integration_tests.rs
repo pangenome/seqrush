@@ -57,6 +57,7 @@ fn test_performance_scaling() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
         };
 
         let start = Instant::now();
@@ -148,6 +149,7 @@ fn test_real_world_example() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush(args).unwrap();
@@ -192,6 +194,7 @@ fn test_command_line_interface() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush(args).unwrap();
@@ -248,6 +251,7 @@ fn test_parallel_consistency() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
         };
 
         run_seqrush(args).unwrap();

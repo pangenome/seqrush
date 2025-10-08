@@ -48,6 +48,7 @@ fn test_no_untraversed_edges_in_output() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush(args).unwrap();
@@ -121,6 +122,7 @@ fn test_self_loops_in_gfa() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush(args).unwrap();
@@ -185,6 +187,7 @@ fn test_complex_graph_produces_valid_gfa() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush(args).unwrap();
