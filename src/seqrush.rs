@@ -104,8 +104,8 @@ pub struct Args {
     #[arg(long = "sgd-sort", default_value = "false")]
     pub sgd_sort: bool,
 
-    /// Aligner to use: 'allwave' or 'sweepga' (default: sweepga)
-    #[arg(long = "aligner", default_value = "sweepga")]
+    /// Aligner to use: 'allwave' or 'sweepga' (default: allwave)
+    #[arg(long = "aligner", default_value = "allwave")]
     pub aligner: String,
 }
 
