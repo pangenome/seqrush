@@ -57,7 +57,7 @@ test = false
 
 [features]
 debug-bins = []
-default = ["use-allwave", "use-sweepga"]
+default = ["use-allwave"]
 use-allwave = ["allwave", "lib_wfa2"]
 use-sweepga = ["sweepga", "fastga-rs"]
 
