@@ -59,14 +59,14 @@ test = false
 debug-bins = []
 default = ["use-allwave"]
 use-allwave = ["allwave", "lib_wfa2"]
-use-sweepga = ["sweepga", "fastga-rs"]
+# use-sweepga = ["sweepga", "fastga-rs"]  # Commented out - enable locally if needed
 
 [dependencies]
 # Use local path dependencies to avoid network fetch during tests
 allwave = { path = "allwave", optional = true }
 lib_wfa2 = { git = "https://github.com/ekg/lib_wfa2", rev = "819b82cd842aabedcb962fd5b82380fe454234f6", optional = true }
-sweepga = { path = "../sweepga", optional = true }
-fastga-rs = { git = "https://github.com/pangenome/fastga-rs.git", optional = true }
+# sweepga = { path = "../sweepga", optional = true }
+# fastga-rs = { git = "https://github.com/pangenome/fastga-rs.git", optional = true }
 union-find = "0.3"
 uf_rush = "0.2"
 rayon = "1.7"
