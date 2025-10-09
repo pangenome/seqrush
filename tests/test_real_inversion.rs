@@ -47,6 +47,7 @@ fn test_real_inversion_case() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     println!("Testing real inversion case...");
@@ -95,6 +96,7 @@ fn test_larger_inversion_with_unique_content() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     println!("\nTesting larger inversion with unique content...");
@@ -142,6 +144,7 @@ fn test_inversion_with_snps() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     println!("\nTesting inversion detection with SNPs...");

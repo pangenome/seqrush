@@ -46,6 +46,7 @@ fn test_inversion_detection_simple() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     println!("Running inversion-aware alignment...");
@@ -114,6 +115,7 @@ fn test_inversion_detection_with_context() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     println!("\nRunning inversion detection with context...");
@@ -162,6 +164,7 @@ fn test_no_inversion() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -208,6 +211,7 @@ fn test_multiple_inversions() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     println!("\nRunning multiple inversion detection...");

@@ -4,6 +4,7 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
+pub mod aligner;
 pub mod bidirected_builder;
 pub mod bidirected_compaction;
 pub mod bidirected_gfa_writer;
@@ -201,12 +202,13 @@ mod tests {
             validate_paf: true,
             paf: None,
             seqwish_style: false,
-        no_sort: false,
-                groom: false,
-        iterative_groom: None,
-        odgi_style_groom: false,
-        sort_groom_sort: false,
-        sgd_sort: false,
+            no_sort: false,
+            groom: false,
+            iterative_groom: None,
+            odgi_style_groom: false,
+            sort_groom_sort: false,
+            sgd_sort: false,
+            aligner: "allwave".to_string(),
         };
 
         run_seqrush(args).unwrap();

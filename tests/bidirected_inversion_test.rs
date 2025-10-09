@@ -46,6 +46,7 @@ fn test_simple_inversion() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -124,6 +125,7 @@ fn test_complex_rearrangement() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -210,6 +212,7 @@ fn test_self_inverse_palindrome() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        aligner: "allwave".to_string(),
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

@@ -2,6 +2,7 @@ use crate::bidirected_ops::BidirectedGraph;
 use crate::bidirected_union_find::BidirectedUnionFind;
 use crate::graph_ops::{Edge, Graph, Node};
 use crate::pos::{make_pos, Pos};
+#[cfg(feature = "use-allwave")]
 use allwave::{AlignmentParams, AllPairIterator, SparsificationStrategy};
 use clap::Parser;
 use rayon::prelude::*;
@@ -102,6 +103,10 @@ pub struct Args {
     /// Apply path-guided SGD sorting (like odgi sort -p Ygs)
     #[arg(long = "sgd-sort", default_value = "false")]
     pub sgd_sort: bool,
+
+    /// Aligner to use: 'allwave' (default: allwave)
+    #[arg(long = "aligner", default_value = "allwave")]
+    pub aligner: String,
 }
 
 #[derive(Clone, Debug)]
@@ -309,8 +314,24 @@ impl SeqRush {
             // Read alignments from PAF file
             self.align_and_unite_from_paf(paf_path, args);
         } else {
-            // Use the new allwave-based implementation
-            self.align_and_unite_with_allwave(args);
+            // Use the configured aligner backend based on CLI argument
+            match args.aligner.as_str() {
+                #[cfg(feature = "use-allwave")]
+                "allwave" => self.align_and_unite_with_allwave(args),
+
+                // Sweepga temporarily disabled for CI
+                // #[cfg(feature = "use-sweepga")]
+                // "sweepga" => self.align_and_unite_with_sweepga(args),
+
+                _ => {
+                    eprintln!("Error: Unknown aligner '{}'. Available aligners:", args.aligner);
+                    #[cfg(feature = "use-allwave")]
+                    eprintln!("  - allwave");
+                    // #[cfg(feature = "use-sweepga")]
+                    // eprintln!("  - sweepga");
+                    std::process::exit(1);
+                }
+            }
         }
     }
 
@@ -348,13 +369,13 @@ impl SeqRush {
             // Parse PAF fields
             let query_name = fields[0];
             let _query_len = fields[1].parse::<usize>().unwrap();
-            let _query_start = fields[2].parse::<usize>().unwrap();
-            let _query_end = fields[3].parse::<usize>().unwrap();
+            let query_start = fields[2].parse::<usize>().unwrap();
+            let query_end = fields[3].parse::<usize>().unwrap();
             let query_strand = fields[4];
             let target_name = fields[5];
             let _target_len = fields[6].parse::<usize>().unwrap();
-            let _target_start = fields[7].parse::<usize>().unwrap();
-            let _target_end = fields[8].parse::<usize>().unwrap();
+            let target_start = fields[7].parse::<usize>().unwrap();
+            let target_end = fields[8].parse::<usize>().unwrap();
 
             // Find CIGAR string in optional fields
             let mut cigar = None;
@@ -400,6 +421,10 @@ impl SeqRush {
                 &self.sequences[target_idx],
                 args.min_match_length,
                 query_is_rc,
+                query_start,
+                query_end,
+                target_start,
+                target_end,
                 verbose,
             );
 
@@ -411,6 +436,7 @@ impl SeqRush {
         }
     }
 
+    #[cfg(feature = "use-allwave")]
     pub fn align_and_unite_with_allwave(&self, args: &Args) {
         // Parse alignment scores
         let scores = match AlignmentScores::parse(&args.scores) {
@@ -549,16 +575,82 @@ impl SeqRush {
         graph_aligner.into_par_iter().for_each(|alignment| {
             // Process all alignments (both directions) for graph construction
             let cigar = allwave::cigar_bytes_to_string(&alignment.cigar_bytes);
+            let query_seq = &self.sequences[alignment.query_idx];
+            let target_seq = &self.sequences[alignment.target_idx];
+            // Allwave aligns full sequences, so coordinates are 0 to length
             self.process_alignment(
                 &cigar,
-                &self.sequences[alignment.query_idx],
-                &self.sequences[alignment.target_idx],
+                query_seq,
+                target_seq,
                 args.min_match_length,
                 alignment.is_reverse,
+                0,
+                query_seq.data.len(),
+                0,
+                target_seq.data.len(),
                 args.verbose,
             );
         });
     }
+
+    /* Sweepga temporarily disabled for CI
+    #[cfg(feature = "use-sweepga")]
+    pub fn align_and_unite_with_sweepga(&self, args: &Args) {
+        use fastga_rs::{Config, FastGA};
+        use std::path::Path;
+        use tempfile::NamedTempFile;
+
+        if args.verbose {
+            println!("Using sweepga aligner");
+        }
+
+        // Get input FASTA path
+        let fasta_path = Path::new(&args.sequences);
+
+        // Create FastGA instance
+        let mut config_builder = Config::builder()
+            .num_threads(args.threads)
+            .verbose(args.verbose);
+
+        let config = config_builder.build();
+        let fastga = match FastGA::new(config) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create FastGA: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        // Run alignment directly on the input file
+        if args.verbose {
+            println!("Running FastGA alignment on {}...", fasta_path.display());
+        }
+
+        // Create temp PAF file
+        let paf_temp = match NamedTempFile::new() {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create temp file: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let num_alignments = match fastga.align_to_file(fasta_path, fasta_path, paf_temp.path()) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("FastGA alignment failed: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        if args.verbose {
+            println!("FastGA produced {} alignments", num_alignments);
+        }
+
+        // Now process the PAF using existing align_and_unite_from_paf
+        self.align_and_unite_from_paf(paf_temp.path().to_str().unwrap(), args);
+    }
+    */
 
     fn process_alignment(
         &self,
@@ -567,6 +659,10 @@ impl SeqRush {
         seq2: &Sequence,
         min_match_len: usize,
         query_is_rc: bool,
+        query_start: usize,
+        query_end: usize,
+        target_start: usize,
+        target_end: usize,
         verbose: bool,
     ) {
         if verbose && (seq1.id == seq2.id || seq1.id.contains("seq1") || seq2.id.contains("seq1")) {
@@ -577,27 +673,42 @@ impl SeqRush {
         }
         // IMPORTANT: query_is_rc means the QUERY (seq1) was reverse complemented for alignment
         // Debug specific alignment
-        let debug_this = false;
-        // Add validation function
-        let validate_match = |seq1: &Sequence,
-                              seq2: &Sequence,
-                              seq1_data: &[u8],
-                              seq2_data: &[u8],
-                              start1: usize,
-                              start2: usize,
-                              len: usize| {
+        let debug_this = query_is_rc && verbose; // Debug RC alignments
+
+        // CRITICAL FIX: Don't RC the entire sequence!
+        // Instead, we'll access it backwards and RC bases on-the-fly
+        // This matches seqwish's approach and preserves correct offsets
+
+        // Helper to get base at position (with RC if needed)
+        let get_query_base = |local_pos: usize| -> u8 {
+            if query_is_rc {
+                // Access backwards and RC the base
+                let base = seq1.data[seq1.data.len() - 1 - local_pos];
+                match base {
+                    b'A' | b'a' => b'T',
+                    b'T' | b't' => b'A',
+                    b'C' | b'c' => b'G',
+                    b'G' | b'g' => b'C',
+                    _ => base,
+                }
+            } else {
+                seq1.data[local_pos]
+            }
+        };
+
+        // Validation function - CRITICAL! (user: "oh shit. you do need validation btw. be careful.")
+        let validate_match = |start1: usize, start2: usize, len: usize| {
             for i in 0..len {
-                let base1 = seq1_data[start1 + i];
-                let base2 = seq2_data[start2 + i];
+                let base1 = get_query_base(start1 + i);
+                let base2 = seq2.data[start2 + i];
 
                 if base1 != base2 {
                     panic!(
                         "VALIDATION ERROR: Attempting to unite non-matching bases!\n\
                          Alignment: {} -> {}\n\
-                         Position {}: seq1_data[{}]='{}' != seq2_data[{}]='{}'\n\
-                         Match region: seq1[{}..{}] -> seq2[{}..{}] len={}\n\
-                         Seq1 context: {}\n\
-                         Seq2 context: {}",
+                         Position {}: query_base[{}]='{}' != target[{}]='{}'\n\
+                         Match region: query[{}..{}] -> target[{}..{}] len={}\n\
+                         query_is_rc: {}",
                         seq1.id,
                         seq2.id,
                         i,
@@ -610,20 +721,15 @@ impl SeqRush {
                         start2,
                         start2 + len,
                         len,
-                        String::from_utf8_lossy(
-                            &seq1_data
-                                [start1.saturating_sub(5)..(start1 + len).min(seq1_data.len())]
-                        ),
-                        String::from_utf8_lossy(
-                            &seq2_data
-                                [start2.saturating_sub(5)..(start2 + len).min(seq2_data.len())]
-                        )
+                        query_is_rc
                     );
                 }
             }
         };
-        let mut pos1 = 0;
-        let mut pos2 = 0;
+
+        // CRITICAL: Start from PAF coordinates, not from 0!
+        let mut pos1 = query_start;
+        let mut pos2 = target_start;
         let mut count = 0;
 
         // Track consecutive matches across multiple M operations
@@ -631,13 +737,6 @@ impl SeqRush {
         let mut match_run_start1 = 0;
         let mut match_run_start2 = 0;
         let mut match_run_len = 0;
-
-        // If query was reverse complemented for alignment, we need to compare against the RC of seq1
-        let seq1_data = if query_is_rc {
-            seq1.reverse_complement()
-        } else {
-            seq1.data.clone()
-        };
 
         if debug_this {
             eprintln!("\n=== DEBUG ALIGNMENT ===");
@@ -659,12 +758,7 @@ impl SeqRush {
                 "Seq1 start: {}",
                 String::from_utf8_lossy(&seq1.data[0..20.min(seq1.data.len())])
             );
-            if query_is_rc {
-                eprintln!(
-                    "Seq1 RC start: {}",
-                    String::from_utf8_lossy(&seq1_data[0..20.min(seq1_data.len())])
-                );
-            }
+            // Debug output removed - seq1_data no longer exists
             eprintln!(
                 "Seq2 start: {}",
                 String::from_utf8_lossy(&seq2.data[0..20.min(seq2.data.len())])
@@ -692,8 +786,8 @@ impl SeqRush {
 
                         // Check all positions in this M operation
                         for k in 0..count {
-                            if pos1 + k < seq1_data.len() && pos2 + k < seq2.data.len() {
-                                let base1 = seq1_data[pos1 + k];
+                            if pos1 + k < seq1.data.len() && pos2 + k < seq2.data.len() {
+                                let base1 = get_query_base(pos1 + k);
                                 let base2 = seq2.data[pos2 + k];
                                 if debug_this && ch == '=' && k < 3 {
                                     eprintln!(
@@ -744,10 +838,6 @@ impl SeqRush {
                                         // }
                                         // Validate before uniting
                                         validate_match(
-                                            seq1,
-                                            seq2,
-                                            &seq1_data,
-                                            &seq2.data,
                                             match_run_start1,
                                             match_run_start2,
                                             match_run_len,
@@ -802,10 +892,6 @@ impl SeqRush {
                             // }
                             // Validate before uniting
                             validate_match(
-                                seq1,
-                                seq2,
-                                &seq1_data,
-                                &seq2.data,
                                 match_run_start1,
                                 match_run_start2,
                                 match_run_len,
@@ -888,10 +974,6 @@ impl SeqRush {
             // }
             // Validate before uniting
             validate_match(
-                seq1,
-                seq2,
-                &seq1_data,
-                &seq2.data,
                 match_run_start1,
                 match_run_start2,
                 match_run_len,
