@@ -104,7 +104,7 @@ pub struct Args {
     #[arg(long = "sgd-sort", default_value = "false")]
     pub sgd_sort: bool,
 
-    /// Aligner to use: 'allwave' or 'sweepga' (default: allwave)
+    /// Aligner to use: 'allwave' (default: allwave)
     #[arg(long = "aligner", default_value = "allwave")]
     pub aligner: String,
 }
@@ -319,15 +319,16 @@ impl SeqRush {
                 #[cfg(feature = "use-allwave")]
                 "allwave" => self.align_and_unite_with_allwave(args),
 
-                #[cfg(feature = "use-sweepga")]
-                "sweepga" => self.align_and_unite_with_sweepga(args),
+                // Sweepga temporarily disabled for CI
+                // #[cfg(feature = "use-sweepga")]
+                // "sweepga" => self.align_and_unite_with_sweepga(args),
 
                 _ => {
                     eprintln!("Error: Unknown aligner '{}'. Available aligners:", args.aligner);
                     #[cfg(feature = "use-allwave")]
                     eprintln!("  - allwave");
-                    #[cfg(feature = "use-sweepga")]
-                    eprintln!("  - sweepga");
+                    // #[cfg(feature = "use-sweepga")]
+                    // eprintln!("  - sweepga");
                     std::process::exit(1);
                 }
             }
@@ -592,6 +593,7 @@ impl SeqRush {
         });
     }
 
+    /* Sweepga temporarily disabled for CI
     #[cfg(feature = "use-sweepga")]
     pub fn align_and_unite_with_sweepga(&self, args: &Args) {
         use fastga_rs::{Config, FastGA};
@@ -648,6 +650,7 @@ impl SeqRush {
         // Now process the PAF using existing align_and_unite_from_paf
         self.align_and_unite_from_paf(paf_temp.path().to_str().unwrap(), args);
     }
+    */
 
     fn process_alignment(
         &self,

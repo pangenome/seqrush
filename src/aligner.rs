@@ -38,23 +38,16 @@ pub fn create_aligner(
     verbose: bool,
     #[allow(unused_variables)] frequency: Option<usize>,
 ) -> Result<Box<dyn Aligner>, Box<dyn Error>> {
-    #[cfg(feature = "use-sweepga")]
-    {
-        Ok(Box::new(sweepga_impl::SweepgaAligner::new(
-            frequency, threads, verbose,
-        )?))
-    }
-
-    #[cfg(all(feature = "use-allwave", not(feature = "use-sweepga")))]
+    #[cfg(feature = "use-allwave")]
     {
         Ok(Box::new(allwave_impl::AllwaveAligner::new(
             threads, verbose,
         )?))
     }
 
-    #[cfg(not(any(feature = "use-allwave", feature = "use-sweepga")))]
+    #[cfg(not(feature = "use-allwave"))]
     {
-        Err("No aligner feature enabled. Enable 'use-allwave' or 'use-sweepga'".into())
+        Err("No aligner feature enabled. Enable 'use-allwave'".into())
     }
 }
 
@@ -62,5 +55,6 @@ pub fn create_aligner(
 #[cfg(feature = "use-allwave")]
 pub mod allwave_impl;
 
-#[cfg(feature = "use-sweepga")]
-pub mod sweepga_impl;
+// Sweepga support temporarily disabled for CI
+// #[cfg(feature = "use-sweepga")]
+// pub mod sweepga_impl;
