@@ -138,7 +138,7 @@ impl Default for PathSGDParams {
             space: 100,
             space_max: 100,
             space_quantization_step: 10,
-            cooling_start: 0.8,
+            cooling_start: 0.5,  // Match ODGI's default
             nthreads: 1,
             progress: false,
             snapshot: false,
@@ -256,9 +256,13 @@ pub fn path_linear_sgd(
         .collect();
 
     // Line 63-69: Seed positions with graph order
+    // CRITICAL: Sort nodes by ID to ensure deterministic ordering (HashMap iter order is non-deterministic!)
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
+
     let mut len = 0.0;
     let mut node_id_to_index: HashMap<usize, usize> = HashMap::new();
-    for (idx, (&node_id, node)) in graph.nodes.iter().enumerate() {
+    for (idx, (&node_id, node)) in sorted_nodes.iter().enumerate() {
         x_positions[idx].store(len);
         node_id_to_index.insert(node_id, idx);
         len += node.sequence.len() as f64;
@@ -571,8 +575,10 @@ pub fn path_linear_sgd(
 
                     // Line 344-347: Get node indices
                     let d_ij = term_dist;
-                    let i = *node_id_to_index.get(&handle_a.node_id()).unwrap_or(&0);
-                    let j = *node_id_to_index.get(&handle_b.node_id()).unwrap_or(&0);
+                    let i = *node_id_to_index.get(&handle_a.node_id())
+                        .expect(&format!("Node {} not found in index", handle_a.node_id()));
+                    let j = *node_id_to_index.get(&handle_b.node_id())
+                        .expect(&format!("Node {} not found in index", handle_b.node_id()));
 
                     // Line 353-362: Calculate distance
                     let mut dx = x_positions[i].load() - x_positions[j].load();
@@ -626,7 +632,20 @@ pub fn path_linear_sgd(
     checker_handle.join().unwrap();
 
     // Line 459-463: Convert atomic positions to regular vector
-    x_positions.iter().map(|x| x.load()).collect()
+    let final_positions: Vec<f64> = x_positions.iter().map(|x| x.load()).collect();
+
+    if params.progress {
+        let total_updates = iteration.load(Ordering::Relaxed) as u64 * params.min_term_updates;
+        eprintln!("[odgi::path_linear_sgd] Final statistics:");
+        eprintln!("  Total iterations: {}", iteration.load(Ordering::Relaxed));
+        eprintln!("  Approx total term updates: {} (iters * min_term_updates)", total_updates);
+        eprintln!("  Final delta_max: {}", delta_max.load());
+        let min_pos = final_positions.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_pos = final_positions.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        eprintln!("  Position range: [{:.2}, {:.2}]", min_pos, max_pos);
+    }
+
+    final_positions
 }
 
 /// Main entry point that mimics ODGI's usage
@@ -641,8 +660,12 @@ pub fn path_sgd_sort(graph: &BidirectedGraph, params: PathSGDParams) -> Vec<Hand
     let positions = path_linear_sgd(graph, &path_index, path_sgd_use_paths, params);
 
     // Sort handles by position
+    // CRITICAL: Must use SAME sorted order as path_linear_sgd when building node_id_to_index mapping!
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
+
     let mut handle_positions: Vec<(Handle, f64)> = Vec::new();
-    for (idx, &node_id) in graph.nodes.keys().enumerate() {
+    for (idx, (&node_id, _node)) in sorted_nodes.iter().enumerate() {
         let handle = Handle::new(node_id, false);
         handle_positions.push((handle, positions[idx]));
     }
