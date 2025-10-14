@@ -6,6 +6,7 @@
 *.og
 *.log
 *.png
+*.paf
 
 # Test data files (except essential ones)
 test_*.fa
