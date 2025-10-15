@@ -209,6 +209,7 @@ mod tests {
             odgi_style_groom: false,
             sort_groom_sort: false,
             sgd_sort: false,
+        sgd_iter_max: 100,
             aligner: "allwave".to_string(),
         };
 
