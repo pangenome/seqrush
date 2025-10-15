@@ -106,6 +106,14 @@ impl PathIndex {
     pub fn get_step_at_path_position(&self, path_idx: usize, rank: usize) -> usize {
         self.paths[path_idx].first_step + rank
     }
+
+    pub fn num_paths(&self) -> usize {
+        self.paths.len()
+    }
+
+    pub fn get_path_length(&self, path_idx: usize) -> usize {
+        self.paths[path_idx].length
+    }
 }
 
 /// Dirty Zipfian distribution with cached zeta values
@@ -152,6 +160,7 @@ fn u64_to_f64(u: u64) -> f64 {
 }
 
 /// Path-guided stochastic gradient descent parameters
+#[derive(Clone)]
 pub struct PathSGDParams {
     pub iter_max: u64,
     pub iter_with_max_learning_rate: u64,
@@ -222,11 +231,15 @@ pub fn path_linear_sgd(
         .collect();
 
     // Seed positions with graph layout
+    // IMPORTANT: Sort nodes by ID to ensure deterministic ordering!
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
+
     let mut len = 0u64;
     let mut handle_to_idx: HashMap<Handle, usize> = HashMap::new();
     let mut idx = 0;
-    for (node_id, node) in &graph.nodes {
-        let handle = Handle::forward(*node_id);
+    for (&node_id, node) in sorted_nodes {
+        let handle = Handle::forward(node_id);
         handle_to_idx.insert(handle, idx);
         x[idx].store(f64_to_u64(len as f64), Ordering::Relaxed);
         len += node.sequence.len() as u64;
@@ -279,6 +292,7 @@ pub fn path_linear_sgd(
     let term_updates = Arc::new(AtomicU64::new(0));
     let iteration = Arc::new(AtomicU64::new(0));
     let eta = Arc::new(AtomicU64::new(f64_to_u64(etas[0])));
+    let adj_theta = Arc::new(AtomicU64::new(f64_to_u64(params.theta)));  // Adaptive theta
     let cooling = Arc::new(AtomicBool::new(false));
     let work_todo = Arc::new(AtomicBool::new(true));
     let delta_max = Arc::new(AtomicU64::new(0));
@@ -297,6 +311,7 @@ pub fn path_linear_sgd(
         let iteration = Arc::clone(&iteration);
         let work_todo = Arc::clone(&work_todo);
         let eta = Arc::clone(&eta);
+        let adj_theta = Arc::clone(&adj_theta);
         let cooling = Arc::clone(&cooling);
         let etas = Arc::clone(&etas);
         let delta_max = Arc::clone(&delta_max);
@@ -318,15 +333,19 @@ pub fn path_linear_sgd(
                         eta.store(f64_to_u64(etas[new_iter as usize]), Ordering::Relaxed);
                     }
 
-                    // Check if we're in cooling phase
-                    if new_iter >= first_cooling_iteration {
-                        cooling.store(true, Ordering::Relaxed);
-                    }
-
                     // Check stopping conditions
                     let curr_delta = u64_to_f64(delta_max.swap(0, Ordering::Relaxed));
                     if new_iter >= iter_max || (delta > 0.0 && curr_delta <= delta) {
                         work_todo.store(false, Ordering::Relaxed);
+                    } else {
+                        // Reset delta_max to delta threshold
+                        delta_max.store(f64_to_u64(delta), Ordering::Relaxed);
+
+                        // Check if we're in cooling phase (ODGI does this AFTER checking stop condition)
+                        if new_iter >= first_cooling_iteration {
+                            adj_theta.store(f64_to_u64(0.001), Ordering::Relaxed);
+                            cooling.store(true, Ordering::Relaxed);
+                        }
                     }
                 }
 
@@ -346,12 +365,12 @@ pub fn path_linear_sgd(
         let term_updates = Arc::clone(&term_updates);
         let work_todo = Arc::clone(&work_todo);
         let eta = Arc::clone(&eta);
+        let adj_theta = Arc::clone(&adj_theta);
         let cooling = Arc::clone(&cooling);
         let delta_max = Arc::clone(&delta_max);
         let space = params.space;
         let space_max = params.space_max;
         let space_quantization_step = params.space_quantization_step;
-        let theta = params.theta;
         let min_term_updates = params.min_term_updates;
 
         let handle = thread::spawn(move || {
@@ -362,9 +381,11 @@ pub fn path_linear_sgd(
             let step_dist = Uniform::new(0, total_steps);
             let flip_dist = Uniform::new(0, 2);
 
-            let mut local_term_updates = 0;
+            // Track local updates, batch them to global counter
+            let mut term_updates_local = 0u64;
 
-            while work_todo.load(Ordering::Relaxed) && local_term_updates < total_term_updates / params.nthreads as u64 {
+            // ODGI workers just check work_todo, no per-thread limit
+            while work_todo.load(Ordering::Relaxed) {
                 // Sample a random step
                 let step_idx = step_dist.sample(&mut rng);
                 let path_idx = path_index.get_path_of_step(step_idx);
@@ -379,7 +400,9 @@ pub fn path_linear_sgd(
 
                 // Decide how to sample the second step
                 if cooling.load(Ordering::Relaxed) || flip_dist.sample(&mut rng) == 1 {
-                    // Use Zipfian distribution
+                    // Use Zipfian distribution with adaptive theta
+                    let current_theta = u64_to_f64(adj_theta.load(Ordering::Relaxed));
+
                     if rank_a > 0 && (flip_dist.sample(&mut rng) == 1 || rank_a == path_step_count - 1) {
                         // Go backward
                         let jump_space = space.min(rank_a as u64);
@@ -390,7 +413,7 @@ pub fn path_linear_sgd(
                         };
 
                         let space_idx = space_idx.min(zetas.len() - 1);
-                        let zipf = DirtyZipfian::new(1, jump_space, theta, zetas[space_idx]);
+                        let zipf = DirtyZipfian::new(1, jump_space, current_theta, zetas[space_idx]);
                         let z_i = zipf.sample(&mut rng);
                         rank_b = rank_a.saturating_sub(z_i as usize);
                     } else if rank_a < path_step_count - 1 {
@@ -403,7 +426,7 @@ pub fn path_linear_sgd(
                         };
 
                         let space_idx = space_idx.min(zetas.len() - 1);
-                        let zipf = DirtyZipfian::new(1, jump_space, theta, zetas[space_idx]);
+                        let zipf = DirtyZipfian::new(1, jump_space, current_theta, zetas[space_idx]);
                         let z_i = zipf.sample(&mut rng);
                         rank_b = (rank_a + z_i as usize).min(path_step_count - 1);
                     }
@@ -439,16 +462,19 @@ pub fn path_linear_sgd(
                 let mu = mu.min(1.0);
 
                 // Get node indices from our mapping
-                let i = handle_to_idx.get(&term_i).copied().unwrap_or(0);
-                let j = handle_to_idx.get(&term_j).copied().unwrap_or(0);
+                // IMPORTANT: Always use forward orientation when looking up indices,
+                // since handle_to_idx only contains forward handles
+                let i = handle_to_idx.get(&Handle::forward(term_i.node_id())).copied().unwrap_or(0);
+                let j = handle_to_idx.get(&Handle::forward(term_j.node_id())).copied().unwrap_or(0);
 
                 // Calculate position difference
                 let x_i = u64_to_f64(x[i].load(Ordering::Relaxed));
                 let x_j = u64_to_f64(x[j].load(Ordering::Relaxed));
-                let dx = x_i - x_j;
+                let mut dx = x_i - x_j;
 
+                // ODGI uses epsilon to avoid NaN, not continue
                 if dx == 0.0 {
-                    continue;
+                    dx = 1e-9;
                 }
 
                 // Calculate update
@@ -480,8 +506,17 @@ pub fn path_linear_sgd(
                 x[i].store(f64_to_u64(new_i), Ordering::Relaxed);
                 x[j].store(f64_to_u64(new_j), Ordering::Relaxed);
 
-                local_term_updates += 1;
-                term_updates.fetch_add(1, Ordering::Relaxed);
+                // ODGI batches updates to reduce atomic contention
+                term_updates_local += 1;
+                if term_updates_local >= 1000 {
+                    term_updates.fetch_add(term_updates_local, Ordering::Relaxed);
+                    term_updates_local = 0;
+                }
+            }
+
+            // Flush remaining local updates
+            if term_updates_local > 0 {
+                term_updates.fetch_add(term_updates_local, Ordering::Relaxed);
             }
         });
 
@@ -518,16 +553,16 @@ fn path_linear_sgd_schedule(
     eps: f64,
 ) -> Vec<f64> {
     let mut etas = Vec::new();
-    let tau = eps.ln() / iter_max as f64;
 
-    for i in 0..iter_max {
-        let w_i = if i < iter_with_max_learning_rate {
-            w_max
-        } else {
-            let exp_value = (-tau * (i - iter_with_max_learning_rate) as f64).exp();
-            w_max - (w_max - w_min) * (1.0 - exp_value)
-        };
-        etas.push(w_i);
+    // ODGI formula (from path_sgd.cpp lines 478-493)
+    let eta_max = 1.0 / w_min;
+    let eta_min = eps / w_max;
+    let lambda = (eta_max / eta_min).ln() / (iter_max as f64 - 1.0);
+
+    // Note: ODGI loops from 0 to iter_max (inclusive), so iter_max+1 values
+    for t in 0..=iter_max {
+        let eta = eta_max * (-lambda * ((t as i64 - iter_with_max_learning_rate as i64).abs() as f64)).exp();
+        etas.push(eta);
     }
 
     etas
@@ -539,8 +574,12 @@ pub fn path_sgd_sort(graph: &BidirectedGraph, params: PathSGDParams) -> Vec<Hand
     let positions = path_linear_sgd(graph_arc, params);
 
     // Create mapping from index to handle
+    // IMPORTANT: Sort nodes by ID to ensure deterministic ordering!
+    let mut sorted_node_ids: Vec<_> = graph.nodes.keys().copied().collect();
+    sorted_node_ids.sort();
+
     let mut idx_to_handle: HashMap<usize, Handle> = HashMap::new();
-    for (idx, node_id) in graph.nodes.keys().enumerate() {
+    for (idx, node_id) in sorted_node_ids.iter().enumerate() {
         idx_to_handle.insert(idx, Handle::forward(*node_id));
     }
 

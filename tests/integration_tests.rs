@@ -57,6 +57,7 @@ fn test_performance_scaling() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
         };
 
@@ -149,6 +150,7 @@ fn test_real_world_example() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -194,6 +196,7 @@ fn test_command_line_interface() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -251,6 +254,7 @@ fn test_parallel_consistency() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
         };
 
