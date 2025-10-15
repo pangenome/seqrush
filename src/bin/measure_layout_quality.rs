@@ -2,7 +2,6 @@
 ///
 /// This measures how well the 1D node positions match the actual genomic distances
 /// along paths. Lower values indicate better layout quality.
-
 use seqrush::bidirected_ops::BidirectedGraph;
 use seqrush::bidirected_graph::Handle;
 use std::collections::HashMap;

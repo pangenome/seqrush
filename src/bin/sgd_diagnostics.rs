@@ -1,6 +1,5 @@
 /// Diagnostic tool to analyze SGD behavior and identify problematic node pairs
 /// Particularly focusing on reverse complement paths
-
 use seqrush::bidirected_ops::BidirectedGraph;
 use seqrush::bidirected_graph::Handle;
 use std::collections::HashMap;
@@ -11,7 +10,7 @@ struct NodePairDiagnostic {
     node_b: usize,
     handle_a: Handle,
     handle_b: Handle,
-    path_name: String,
+    _path_name: String,
     pos_in_path_a: usize,
     pos_in_path_b: usize,
     path_distance: f64,
@@ -176,7 +175,7 @@ fn main() {
                     node_b: handle_b.node_id(),
                     handle_a,
                     handle_b,
-                    path_name: path.name.clone(),
+                    _path_name: path.name.clone(),
                     pos_in_path_a,
                     pos_in_path_b,
                     path_distance,
