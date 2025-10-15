@@ -55,6 +55,21 @@ path = "src/bin/test_handlegraph_traits.rs"
 required-features = ["debug-bins"]
 test = false
 
+[[bin]]
+name = "measure_layout_quality"
+path = "src/bin/measure_layout_quality.rs"
+test = false
+
+[[bin]]
+name = "sgd_diagnostics"
+path = "src/bin/sgd_diagnostics.rs"
+test = false
+
+[[bin]]
+name = "debug_sgd_simple"
+path = "src/bin/debug_sgd_simple.rs"
+test = false
+
 [features]
 debug-bins = []
 default = ["use-allwave"]

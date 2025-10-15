@@ -104,6 +104,10 @@ pub struct Args {
     #[arg(long = "sgd-sort", default_value = "false")]
     pub sgd_sort: bool,
 
+    /// Number of SGD iterations (default: 100)
+    #[arg(long = "sgd-iter-max", default_value = "100")]
+    pub sgd_iter_max: u64,
+
     /// Aligner to use: 'allwave' (default: allwave)
     #[arg(long = "aligner", default_value = "allwave")]
     pub aligner: String,
@@ -1016,6 +1020,7 @@ impl SeqRush {
             args.iterative_groom,
             args.odgi_style_groom,
             args.sgd_sort,
+            args.sgd_iter_max,
             args.threads,
             verbose,
         )

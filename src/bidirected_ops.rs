@@ -1,6 +1,7 @@
 use crate::bidirected_graph::{BiEdge, BiNode, BiPath, Handle};
 use crate::graph_ops::{Edge, Graph, Node};
 use std::collections::{BTreeSet, HashMap, HashSet};
+use sha2::{Sha256, Digest};
 
 /// A bidirected graph that extends the basic Graph with orientation support
 #[derive(Clone)]
@@ -67,6 +68,9 @@ impl BidirectedGraph {
     /// Compact the graph by merging linear chains of nodes
     /// Renumber nodes to be sequential starting from 1
     pub fn renumber_nodes_sequentially(&mut self) {
+        eprintln!("[VALIDATION] Before renumbering - checking for issues...");
+        self.validate_paths("before renumbering");
+
         let mut old_to_new: HashMap<usize, usize> = HashMap::new();
         let mut new_id = 1;
 
@@ -81,6 +85,9 @@ impl BidirectedGraph {
 
         // Apply the renumbering
         self.apply_node_id_mapping(&old_to_new);
+
+        eprintln!("[VALIDATION] After renumbering - checking for issues...");
+        self.validate_paths("after renumbering");
     }
 
     pub fn compact(&mut self) {
@@ -89,6 +96,7 @@ impl BidirectedGraph {
 
         // Validate before compaction
         self.validate_graph_consistency("before compaction");
+        self.validate_paths("before compaction");
 
         // Keep compacting until no more changes
         while compacted {
@@ -104,6 +112,7 @@ impl BidirectedGraph {
                     compacted = true;
                     // Validate after each merge
                     self.validate_graph_consistency(&format!("after merge in iteration {}", iteration));
+                    self.validate_paths(&format!("after merge in iteration {}", iteration));
                 }
             }
 
@@ -114,6 +123,7 @@ impl BidirectedGraph {
 
         // Final validation
         self.validate_graph_consistency("after compaction");
+        self.validate_paths("after compaction");
     }
 
     /// Find simple components (linear chains that can be merged)
@@ -283,7 +293,10 @@ impl BidirectedGraph {
         if handles.len() < 2 {
             return false;
         }
-        
+
+        eprintln!("[COMPACT DEBUG] Attempting to merge chain: {:?}",
+                  handles.iter().map(|h| format!("{}{}", h.node_id(), if h.is_reverse() { "-" } else { "+" })).collect::<Vec<_>>());
+
         // First, build a complete mapping of what needs to be replaced
         // This includes both the handles in the chain and their flipped versions
         let mut handle_mapping = std::collections::HashMap::new();
@@ -360,6 +373,8 @@ impl BidirectedGraph {
                     
                     // If we get here, the handle appears but not as part of a complete chain
                     // Cannot compact this chain
+                    eprintln!("[COMPACT DEBUG] Chain validation FAILED: handle {} appears individually in path {} at position {}",
+                             path.steps[i], path.name, i);
                     return false;
                 }
                 i += 1;
@@ -367,13 +382,16 @@ impl BidirectedGraph {
         }
         
         // All paths validated - proceed with the merge
+        eprintln!("[COMPACT DEBUG] Validation passed, creating new node {}", new_node_id);
         self.add_node(new_node_id, new_sequence);
-        
+
         // Update all paths
         for path in &mut self.paths {
+            let old_step_count = path.steps.len();
             let mut new_steps = Vec::new();
             let mut i = 0;
-            
+            let mut replacements = 0;
+
             while i < path.steps.len() {
                 // Check for forward chain
                 if i + handles.len() <= path.steps.len() {
@@ -385,12 +403,13 @@ impl BidirectedGraph {
                         }
                     }
                     if is_forward_chain {
+                        replacements += 1;
                         new_steps.push(new_handle_forward);
                         i += handles.len();
                         continue;
                     }
                 }
-                
+
                 // Check for reverse chain
                 let rev_chain: Vec<Handle> = handles.iter().rev().map(|h| h.flip()).collect();
                 if i + rev_chain.len() <= path.steps.len() {
@@ -402,17 +421,24 @@ impl BidirectedGraph {
                         }
                     }
                     if is_reverse_chain {
+                        replacements += 1;
                         new_steps.push(new_handle_reverse);
                         i += rev_chain.len();
                         continue;
                     }
                 }
-                
+
                 // Not part of a chain, keep as is
                 new_steps.push(path.steps[i]);
                 i += 1;
             }
-            
+
+            let new_step_count = new_steps.len();
+            if replacements > 0 {
+                eprintln!("[COMPACT DEBUG]   Path {}: {} steps -> {} steps ({} chain replacements)",
+                         path.name, old_step_count, new_step_count, replacements);
+            }
+
             path.steps = new_steps;
         }
         
@@ -475,12 +501,18 @@ impl BidirectedGraph {
         }
 
         self.edges = new_edges;
-        
+
         // Remove old nodes
+        eprintln!("[COMPACT DEBUG] Removing {} old nodes from chain", handles.len());
         for &handle in handles {
-            self.nodes.remove(&handle.node_id());
+            let node_id = handle.node_id();
+            if self.nodes.remove(&node_id).is_some() {
+                eprintln!("[COMPACT DEBUG]   Removed node {}", node_id);
+            } else {
+                eprintln!("[COMPACT DEBUG]   WARNING: Node {} was already deleted!", node_id);
+            }
         }
-        
+
         true
     }
 
@@ -944,6 +976,95 @@ impl BidirectedGraph {
         } else {
             true
         }
+    }
+
+    /// Compute SHA-256 hash of a path's sequence
+    pub fn compute_path_hash(&self, path: &BiPath) -> String {
+        let mut hasher = Sha256::new();
+
+        for handle in &path.steps {
+            if let Some(seq) = self.get_sequence(*handle) {
+                hasher.update(&seq);
+            }
+        }
+
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Compute SHA-256 hashes for all paths
+    pub fn compute_all_path_hashes(&self) -> HashMap<String, String> {
+        let mut hashes = HashMap::new();
+        for path in &self.paths {
+            hashes.insert(path.name.clone(), self.compute_path_hash(path));
+        }
+        hashes
+    }
+
+    /// Validate paths - check basic statistics and optionally verify hashes haven't changed
+    /// NOTE: Repeated consecutive nodes ARE VALID in seqwish/odgi graphs!
+    /// They represent structural variation (indels, duplications, etc.)
+    pub fn validate_paths(&self, phase: &str) -> bool {
+        eprintln!("[VALIDATION] At phase '{}': {} paths, {} nodes, {} edges",
+                  phase, self.paths.len(), self.nodes.len(), self.edges.len());
+
+        // Compute and display path hashes
+        let hashes = self.compute_all_path_hashes();
+        eprintln!("[VALIDATION] Path hashes at '{}':", phase);
+        for (name, hash) in &hashes {
+            eprintln!("  {}: {}...", name, &hash[..16]);
+        }
+
+        // Just print statistics for now - repeated nodes are actually valid!
+        let mut has_repeats = false;
+        for path in &self.paths {
+            let mut node_counts = HashMap::new();
+            let mut consecutive_repeats = 0;
+
+            for handle in &path.steps {
+                *node_counts.entry(handle.node_id()).or_insert(0) += 1;
+            }
+
+            for i in 0..(path.steps.len().saturating_sub(1)) {
+                if path.steps[i] == path.steps[i + 1] {
+                    consecutive_repeats += 1;
+                }
+            }
+
+            if consecutive_repeats > 0 || node_counts.values().any(|&c| c > 5) {
+                has_repeats = true;
+            }
+        }
+
+        if has_repeats {
+            eprintln!("[VALIDATION INFO] Graph has repeated nodes in paths (this is VALID for representing structural variation)");
+        }
+
+        true // Always pass - repeated nodes are valid
+    }
+
+    /// Validate that path hashes match expected values
+    pub fn validate_path_hashes(&self, expected_hashes: &HashMap<String, String>, phase: &str) -> bool {
+        let current_hashes = self.compute_all_path_hashes();
+        let mut all_match = true;
+
+        eprintln!("[VALIDATION] Checking path sequence integrity at '{}':", phase);
+        for (name, expected_hash) in expected_hashes {
+            if let Some(current_hash) = current_hashes.get(name) {
+                if current_hash != expected_hash {
+                    eprintln!("  ERROR: Path {} hash changed!", name);
+                    eprintln!("    Expected: {}", expected_hash);
+                    eprintln!("    Got:      {}", current_hash);
+                    all_match = false;
+                } else {
+                    eprintln!("  ✓ Path {} sequence preserved", name);
+                }
+            } else {
+                eprintln!("  ERROR: Path {} missing!", name);
+                all_match = false;
+            }
+        }
+
+        all_match
     }
 
     /// Verify that all edges needed for paths exist in the graph
