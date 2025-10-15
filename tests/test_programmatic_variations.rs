@@ -193,6 +193,7 @@ fn test_programmatic_inversions_scale() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -262,6 +263,7 @@ fn test_gc_content_variation() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -347,6 +349,7 @@ fn test_motif_based_variations() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -423,6 +426,7 @@ fn test_microsatellite_instability() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -501,6 +505,7 @@ fn test_complex_structural_variation_patterns() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -590,6 +595,7 @@ fn test_nested_tandem_inversions() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 

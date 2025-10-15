@@ -47,6 +47,7 @@ fn test_real_inversion_case() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -96,6 +97,7 @@ fn test_larger_inversion_with_unique_content() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -144,6 +146,7 @@ fn test_inversion_with_snps() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 

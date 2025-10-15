@@ -102,6 +102,7 @@ fn test_inverted_repeats() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -163,6 +164,7 @@ fn test_complex_cnv_repeats() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -221,6 +223,7 @@ fn test_y_shaped_breakpoint() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -273,6 +276,7 @@ fn test_nested_inversions() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -336,6 +340,7 @@ fn test_random_rearrangements() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -400,6 +405,7 @@ fn test_tandem_repeat_polymorphism() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -459,6 +465,7 @@ fn test_complex_nested_variations() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -522,6 +529,7 @@ fn test_interspersed_repeats_with_inversions() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 
@@ -592,6 +600,7 @@ fn test_breakpoint_resolution() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
 

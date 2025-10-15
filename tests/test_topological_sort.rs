@@ -38,6 +38,7 @@ fn test_sorting_creates_sequential_node_ids() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
     
@@ -66,6 +67,7 @@ fn test_sorting_creates_sequential_node_ids() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
     
@@ -171,6 +173,7 @@ fn test_sorting_preserves_graph_structure() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
     
@@ -199,6 +202,7 @@ fn test_sorting_preserves_graph_structure() {
         odgi_style_groom: false,
         sort_groom_sort: false,
         sgd_sort: false,
+        sgd_iter_max: 100,
         aligner: "allwave".to_string(),
     };
     
