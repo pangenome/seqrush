@@ -99,6 +99,7 @@ impl BidirectedGraph {
     fn groom_bfs_with_order(&self, seeds: &[Handle], visited: &mut HashSet<usize>,
                             flipped: &mut HashSet<usize>, order: &mut Vec<usize>) {
         let mut queue = VecDeque::new();
+        let verbose_groom = std::env::var("SEQRUSH_GROOM_DEBUG").is_ok();
 
         // Initialize queue with seeds
         for &seed in seeds {
@@ -107,9 +108,17 @@ impl BidirectedGraph {
                 visited.insert(seed.node_id());
                 order.push(seed.node_id());  // Track traversal order
 
+                if verbose_groom {
+                    eprintln!("[groom_bfs] Seed node {} orientation {}",
+                             seed.node_id(), if seed.is_reverse() { "REVERSE" } else { "FORWARD" });
+                }
+
                 // ODGI logic: flip if we visit via reverse orientation
                 if seed.is_reverse() {
                     flipped.insert(seed.node_id());
+                    if verbose_groom {
+                        eprintln!("[groom_bfs]   -> Marking {} as FLIPPED (seed was reverse)", seed.node_id());
+                    }
                 }
             }
         }
@@ -124,9 +133,18 @@ impl BidirectedGraph {
                         visited.insert(next.node_id());
                         order.push(next.node_id());  // Track traversal order
 
+                        if verbose_groom {
+                            eprintln!("[groom_bfs] From {}{}  ->  {}{}",
+                                     current.node_id(), if current.is_reverse() { "-" } else { "+" },
+                                     next.node_id(), if next.is_reverse() { "-" } else { "+" });
+                        }
+
                         // ODGI logic: mark as flipped if we reach it via reverse orientation
                         if next.is_reverse() {
                             flipped.insert(next.node_id());
+                            if verbose_groom {
+                                eprintln!("[groom_bfs]   -> Marking {} as FLIPPED (reached via reverse)", next.node_id());
+                            }
                         }
 
                         // Continue BFS from the handle we arrived at

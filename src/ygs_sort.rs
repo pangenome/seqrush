@@ -24,7 +24,7 @@ impl Default for YgsParams {
     fn default() -> Self {
         YgsParams {
             path_sgd: PathSGDParams {
-                iter_max: 30,  // ODGI default for production use
+                iter_max: 100,  // ODGI default (from sort_main.cpp)
                 iter_with_max_learning_rate: 0,
                 min_term_updates: 0,  // Will be calculated based on paths
                 delta: 0.0,
@@ -34,7 +34,7 @@ impl Default for YgsParams {
                 space: 0,  // Will be calculated from longest path
                 space_max: 100,
                 space_quantization_step: 100,
-                cooling_start: 0.5,
+                cooling_start: 0.5,  // ODGI default
                 nthreads: 1,
                 progress: false,
             },
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn test_ygs_params_default() {
         let params = YgsParams::default();
-        assert_eq!(params.path_sgd.iter_max, 30);
+        assert_eq!(params.path_sgd.iter_max, 100);  // ODGI default
         assert_eq!(params.path_sgd.theta, 0.99);
         assert_eq!(params.path_sgd.eps, 0.01);
     }

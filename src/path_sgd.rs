@@ -321,32 +321,40 @@ pub fn path_linear_sgd(
 
         thread::spawn(move || {
             while work_todo.load(Ordering::Relaxed) {
-                let curr_iter = iteration.load(Ordering::Relaxed);
                 let curr_updates = term_updates.load(Ordering::Relaxed);
 
-                if curr_updates >= (curr_iter + 1) * min_term_updates {
+                // ODGI checks: have we done enough updates for THIS iteration?
+                if curr_updates > min_term_updates {
+                    let curr_iter = iteration.load(Ordering::Relaxed);
                     iteration.fetch_add(1, Ordering::Relaxed);
                     let new_iter = curr_iter + 1;
 
-                    // Update learning rate
-                    if (new_iter as usize) < etas.len() {
-                        eta.store(f64_to_u64(etas[new_iter as usize]), Ordering::Relaxed);
-                    }
-
-                    // Check stopping conditions
-                    let curr_delta = u64_to_f64(delta_max.swap(0, Ordering::Relaxed));
-                    if new_iter >= iter_max || (delta > 0.0 && curr_delta <= delta) {
+                    // Check stopping conditions BEFORE updating eta
+                    if new_iter > iter_max {
                         work_todo.store(false, Ordering::Relaxed);
                     } else {
-                        // Reset delta_max to delta threshold
-                        delta_max.store(f64_to_u64(delta), Ordering::Relaxed);
+                        let curr_delta = u64_to_f64(delta_max.load(Ordering::Relaxed));
+                        if delta > 0.0 && curr_delta <= delta {
+                            work_todo.store(false, Ordering::Relaxed);
+                        } else {
+                            // Update learning rate
+                            if (new_iter as usize) < etas.len() {
+                                eta.store(f64_to_u64(etas[new_iter as usize]), Ordering::Relaxed);
+                            }
 
-                        // Check if we're in cooling phase (ODGI does this AFTER checking stop condition)
-                        if new_iter >= first_cooling_iteration {
-                            adj_theta.store(f64_to_u64(0.001), Ordering::Relaxed);
-                            cooling.store(true, Ordering::Relaxed);
+                            // Reset delta_max to delta threshold
+                            delta_max.store(f64_to_u64(delta), Ordering::Relaxed);
+
+                            // Check if we're in cooling phase
+                            if new_iter > first_cooling_iteration {
+                                adj_theta.store(f64_to_u64(0.001), Ordering::Relaxed);
+                                cooling.store(true, Ordering::Relaxed);
+                            }
                         }
                     }
+
+                    // CRITICAL: Reset term_updates after each iteration (ODGI does this!)
+                    term_updates.store(0, Ordering::Relaxed);
                 }
 
                 thread::sleep(Duration::from_millis(1));

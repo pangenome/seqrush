@@ -1338,20 +1338,24 @@ impl BidirectedGraph {
         let mut heads = Vec::new();
 
         for &node_id in self.nodes.keys() {
-            // Only check forward orientation, matching ODGI's behavior
-            let handle = Handle::forward(node_id);
+            // Check if this node has ANY incoming edges (to either orientation)
+            // A head node has no incoming edges to either its forward or reverse orientation
             let mut has_incoming = false;
 
-            // Check if any edge comes TO this handle
+            // Check for edges to either orientation
+            let fwd_handle = Handle::forward(node_id);
+            let rev_handle = Handle::reverse(node_id);
+
             for edge in &self.edges {
-                if edge.to == handle {
+                if edge.to == fwd_handle || edge.to == rev_handle {
                     has_incoming = true;
                     break;
                 }
             }
 
+            // If no incoming edges, add the forward orientation as head
             if !has_incoming {
-                heads.push(handle);
+                heads.push(fwd_handle);
             }
         }
 
