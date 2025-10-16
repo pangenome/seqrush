@@ -80,33 +80,61 @@ pub struct Args {
     #[arg(long = "seqwish-style", default_value = "false", hide = true)]
     pub seqwish_style: bool,
 
-    /// Disable topological sorting of nodes (sorting is enabled by default)
+    /// Skip all sorting (by default, uses full Ygs pipeline: Y=SGD, g=groom, s=topological sort)
     #[arg(long = "no-sort", default_value = "false")]
     pub no_sort: bool,
 
-    /// Apply grooming before sorting to orient graph consistently
-    #[arg(long = "groom", default_value = "false")]
-    pub groom: bool,
+    /// Skip the path-guided SGD phase (Y) of the Ygs pipeline
+    #[arg(long = "skip-sgd", default_value = "false")]
+    pub skip_sgd: bool,
 
-    /// Use sort-groom-sort strategy (sort, then groom, then sort again)
-    #[arg(long = "sort-groom-sort", default_value = "false")]
+    /// Skip the grooming phase (g) of the Ygs pipeline
+    #[arg(long = "skip-groom", default_value = "false")]
+    pub skip_groom: bool,
+
+    /// Skip the topological sort phase (s) of the Ygs pipeline
+    #[arg(long = "skip-topo", default_value = "false")]
+    pub skip_topo: bool,
+
+    /// Number of SGD iterations (default: 30, matching ODGI)
+    #[arg(long = "sgd-iter-max", default_value = "30")]
+    pub sgd_iter_max: u64,
+
+    /// SGD learning rate parameter eta_max (default: calculated from graph)
+    #[arg(long = "sgd-eta-max")]
+    pub sgd_eta_max: Option<f64>,
+
+    /// SGD cooling/momentum parameter theta (default: 0.99)
+    #[arg(long = "sgd-theta", default_value = "0.99")]
+    pub sgd_theta: f64,
+
+    /// SGD convergence parameter eps (default: 0.01)
+    #[arg(long = "sgd-eps", default_value = "0.01")]
+    pub sgd_eps: f64,
+
+    /// SGD cooling start (default: 0.5)
+    #[arg(long = "sgd-cooling-start", default_value = "0.5")]
+    pub sgd_cooling_start: f64,
+
+    /// [DEPRECATED] Use sort-groom-sort strategy (use --skip-* flags instead)
+    #[arg(long = "sort-groom-sort", default_value = "false", hide = true)]
     pub sort_groom_sort: bool,
 
-    /// Apply iterative grooming until stabilization (max N iterations)
-    #[arg(long = "iterative-groom", value_name = "N")]
+    /// [DEPRECATED] Apply iterative grooming (use Ygs pipeline instead)
+    #[arg(long = "iterative-groom", value_name = "N", hide = true)]
     pub iterative_groom: Option<usize>,
 
-    /// Apply ODGI-style grooming with traversal-based node reordering
-    #[arg(long = "odgi-groom", default_value = "false")]
+    /// [DEPRECATED] Apply ODGI-style grooming (use Ygs pipeline instead)
+    #[arg(long = "odgi-groom", default_value = "false", hide = true)]
     pub odgi_style_groom: bool,
 
-    /// Apply path-guided SGD sorting (like odgi sort -p Ygs)
-    #[arg(long = "sgd-sort", default_value = "false")]
+    /// [DEPRECATED] Old flag for SGD sorting (now enabled by default, use --skip-sgd to disable)
+    #[arg(long = "sgd-sort", default_value = "false", hide = true)]
     pub sgd_sort: bool,
 
-    /// Number of SGD iterations (default: 100)
-    #[arg(long = "sgd-iter-max", default_value = "100")]
-    pub sgd_iter_max: u64,
+    /// [DEPRECATED] Use --skip-groom instead
+    #[arg(long = "groom", default_value = "false", hide = true)]
+    pub groom: bool,
 
     /// Aligner to use: 'allwave' (default: allwave)
     #[arg(long = "aligner", default_value = "allwave")]
@@ -1015,12 +1043,14 @@ impl SeqRush {
             output_path,
             args.no_compact,
             args.no_sort,
-            args.groom,
-            args.sort_groom_sort,
-            args.iterative_groom,
-            args.odgi_style_groom,
-            args.sgd_sort,
+            args.skip_sgd,
+            args.skip_groom,
+            args.skip_topo,
             args.sgd_iter_max,
+            args.sgd_eta_max,
+            args.sgd_theta,
+            args.sgd_eps,
+            args.sgd_cooling_start,
             args.threads,
             verbose,
         )

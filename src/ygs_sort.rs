@@ -110,6 +110,24 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
 
     if params.verbose {
         eprintln!("[ygs_sort] After SGD: {} nodes", graph.nodes.len());
+        eprintln!("[ygs_sort] Edges after SGD:");
+        let mut edges_vec: Vec<_> = graph.edges.iter().collect();
+        edges_vec.sort_by_key(|e| (e.from.node_id(), e.from.is_reverse(), e.to.node_id(), e.to.is_reverse()));
+        for edge in edges_vec {
+            eprintln!("[ygs_sort]   {} {} -> {} {}",
+                     edge.from.node_id(),
+                     if edge.from.is_reverse() { "-" } else { "+" },
+                     edge.to.node_id(),
+                     if edge.to.is_reverse() { "-" } else { "+" });
+        }
+        eprintln!("[ygs_sort] Path after SGD:");
+        for path in &graph.paths {
+            for (i, step) in path.steps.iter().enumerate() {
+                eprintln!("[ygs_sort]   Step {}: Node {}{}",
+                         i, step.node_id(),
+                         if step.is_reverse() { "-" } else { "+" });
+            }
+        }
     }
 
     // Step 2: g - Groom the graph
@@ -127,6 +145,25 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
     // Step 3: s - Topological sort (heads only)
     if params.verbose {
         eprintln!("[ygs_sort] === Step 3/3: Topological sort (s) ===");
+        eprintln!("[ygs_sort] Graph state before topo sort:");
+        eprintln!("[ygs_sort]   Edges:");
+        let mut edges_vec: Vec<_> = graph.edges.iter().collect();
+        edges_vec.sort_by_key(|e| (e.from.node_id(), e.from.is_reverse(), e.to.node_id(), e.to.is_reverse()));
+        for edge in edges_vec {
+            eprintln!("[ygs_sort]     {} {} -> {} {}",
+                     edge.from.node_id(),
+                     if edge.from.is_reverse() { "-" } else { "+" },
+                     edge.to.node_id(),
+                     if edge.to.is_reverse() { "-" } else { "+" });
+        }
+        eprintln!("[ygs_sort]   Path steps:");
+        for path in &graph.paths {
+            for (i, step) in path.steps.iter().enumerate() {
+                eprintln!("[ygs_sort]     Step {}: Node {}{}",
+                         i, step.node_id(),
+                         if step.is_reverse() { "-" } else { "+" });
+            }
+        }
     }
 
     // use_heads=true, use_tails=false matches ODGI's 's' command

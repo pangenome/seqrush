@@ -1313,8 +1313,27 @@ impl BidirectedGraph {
         sorted
     }
 
+    /// Build a map of node_id -> earliest position in any path
+    /// This is used to prioritize nodes based on path order during topological sort
+    fn build_path_position_map(&self) -> HashMap<usize, usize> {
+        let mut position_map: HashMap<usize, usize> = HashMap::new();
+
+        for path in &self.paths {
+            for (pos, handle) in path.steps.iter().enumerate() {
+                let node_id = handle.node_id();
+                // Keep the minimum position (earliest occurrence)
+                position_map.entry(node_id)
+                    .and_modify(|existing_pos: &mut usize| *existing_pos = (*existing_pos).min(pos))
+                    .or_insert(pos);
+            }
+        }
+
+        position_map
+    }
+
     /// Find all nodes with no edges on their left sides (heads)
     /// In a bidirected graph, we check for incoming edges to the forward orientation
+    /// Heads are sorted by their earliest position in paths for path-aware sorting
     pub fn find_head_nodes(&self) -> Vec<Handle> {
         let mut heads = Vec::new();
 
@@ -1336,8 +1355,16 @@ impl BidirectedGraph {
             }
         }
 
-        // Sort for deterministic behavior
-        heads.sort_by_key(|h| h.node_id());
+        // Sort by path position for path-aware topological sorting
+        // Nodes that appear earlier in paths are processed first
+        let path_positions = self.build_path_position_map();
+        heads.sort_by_key(|h| {
+            (
+                path_positions.get(&h.node_id()).copied().unwrap_or(usize::MAX),
+                h.node_id()
+            )
+        });
+
         heads
     }
     
@@ -1369,6 +1396,7 @@ impl BidirectedGraph {
 
     /// Exact ODGI topological_order algorithm
     /// This is a modified Kahn's algorithm that can handle cycles and bidirected graphs
+    /// Enhanced with path-aware ordering: prioritizes nodes based on their path positions
     pub fn exact_odgi_topological_order(
         &self,
         use_heads: bool,
@@ -1376,18 +1404,21 @@ impl BidirectedGraph {
         verbose: bool,
     ) -> Vec<Handle> {
         let mut sorted = Vec::new();
-        
+
         if self.nodes.is_empty() {
             return sorted;
         }
-        
+
+        // Build path position map for path-aware ordering
+        let path_positions = self.build_path_position_map();
+
         // S - set of oriented handles ready to be processed
         // Using BTreeSet for deterministic ordering (ODGI behavior)
         let mut s: BTreeSet<Handle> = BTreeSet::new();
-        
+
         // Track which nodes have been visited (not handles, nodes!)
         let mut visited_nodes = HashSet::new();
-        
+
         // Unvisited - track which handles haven't been processed yet
         let mut unvisited = HashSet::new();
         for &node_id in self.nodes.keys() {
@@ -1395,31 +1426,47 @@ impl BidirectedGraph {
             unvisited.insert(Handle::forward(node_id));
             unvisited.insert(Handle::reverse(node_id));
         }
-        
-        // Seeds for breaking cycles - ordered for determinism
-        let mut seeds: BTreeSet<Handle> = BTreeSet::new();
-        
+
+        // Seeds for breaking cycles - keep as Vec to preserve path-ordered heads
+        let mut seeds: Vec<Handle> = Vec::new();
+
         // Track masked (logically removed) edges
         let mut masked_edges = HashSet::new();
-        
+
         // Initialize with heads or tails if requested
+        // Important: Only add ONE head at a time to maintain path ordering
         if use_heads {
-            for handle in self.find_head_nodes() {
+            // Get heads in path-order (already sorted by find_head_nodes)
+            let heads = self.find_head_nodes();
+            if !heads.is_empty() {
+                // Start with the first head (earliest in paths)
+                let first_head = heads[0];
                 if verbose {
-                    eprintln!("[exact_odgi] Starting with head: node {}", handle.node_id());
+                    eprintln!("[exact_odgi] Starting with head: node {}", first_head.node_id());
                 }
-                s.insert(handle);
-                unvisited.remove(&handle);
-                unvisited.remove(&handle.flip());
+                s.insert(first_head);
+                unvisited.remove(&first_head);
+                unvisited.remove(&first_head.flip());
+
+                // Keep remaining heads as seeds for later
+                for handle in heads.into_iter().skip(1) {
+                    seeds.push(handle);
+                }
             }
         } else if use_tails {
-            for handle in self.find_tail_nodes() {
+            let tails = self.find_tail_nodes();
+            if !tails.is_empty() {
+                let first_tail = tails[0];
                 if verbose {
-                    eprintln!("[exact_odgi] Starting with tail: node {}", handle.node_id());
+                    eprintln!("[exact_odgi] Starting with tail: node {}", first_tail.node_id());
                 }
-                s.insert(handle);
-                unvisited.remove(&handle);
-                unvisited.remove(&handle.flip());
+                s.insert(first_tail);
+                unvisited.remove(&first_tail);
+                unvisited.remove(&first_tail.flip());
+
+                for handle in tails.into_iter().skip(1) {
+                    seeds.push(handle);
+                }
             }
         }
         
@@ -1428,40 +1475,49 @@ impl BidirectedGraph {
             
             // If S is empty, need to pick a seed to break into a cycle
             if s.is_empty() {
-                // First try previously identified seeds
+                // First try previously identified seeds (in path order)
                 let mut found_seed = false;
-                
-                // Process seeds in order
-                let seed_vec: Vec<Handle> = seeds.iter().cloned().collect();
-                for handle in seed_vec {
+
+                // Process seeds in order - they're already path-ordered
+                if !seeds.is_empty() {
+                    // Take the first seed from the Vec (earliest in paths)
+                    let handle = seeds.remove(0);
                     if unvisited.contains(&handle) {
                         s.insert(handle);
                         unvisited.remove(&handle);
                         unvisited.remove(&handle.flip());
-                        seeds.remove(&handle);
                         found_seed = true;
                         if verbose {
-                            eprintln!("[exact_odgi] Using seed: node {} orient {}", 
-                                     handle.node_id(), 
+                            eprintln!("[exact_odgi] Using seed: node {} orient {}",
+                                     handle.node_id(),
                                      if handle.is_reverse() { "-" } else { "+" });
                         }
-                        break;
+                    } else {
+                        // This seed was already visited, try the next one
+                        found_seed = false;
                     }
                 }
                 
                 // If no seeds available, pick arbitrary unvisited handle
+                // Use path position to prioritize nodes that appear earlier in paths
                 if !found_seed && !unvisited.is_empty() {
-                    // Get minimum unvisited handle for deterministic behavior
+                    // Get handle with earliest path position (or lowest ID as tiebreaker)
                     let min_handle = unvisited.iter()
-                        .min_by_key(|h| (h.node_id(), h.is_reverse()))
+                        .min_by_key(|h| {
+                            (
+                                path_positions.get(&h.node_id()).copied().unwrap_or(usize::MAX),
+                                h.node_id(),
+                                h.is_reverse()
+                            )
+                        })
                         .cloned()
                         .unwrap();
-                    
+
                     s.insert(min_handle);
                     unvisited.remove(&min_handle);
                     unvisited.remove(&min_handle.flip());
                     if verbose {
-                        eprintln!("[exact_odgi] Using arbitrary: node {} orient {}", 
+                        eprintln!("[exact_odgi] Using arbitrary: node {} orient {}",
                                  min_handle.node_id(),
                                  if min_handle.is_reverse() { "-" } else { "+" });
                     }
@@ -1541,9 +1597,11 @@ impl BidirectedGraph {
                                 }
                             } else {
                                 // Still has dependencies, mark as potential seed for cycle breaking
-                                seeds.insert(next_handle);
+                                if !seeds.contains(&next_handle) {
+                                    seeds.push(next_handle);
+                                }
                                 if verbose {
-                                    eprintln!("[exact_odgi]     Marking as seed: node {} orient {}", 
+                                    eprintln!("[exact_odgi]     Marking as seed: node {} orient {}",
                                              next_handle.node_id(),
                                              if next_handle.is_reverse() { "-" } else { "+" });
                                 }
@@ -1574,10 +1632,28 @@ impl BidirectedGraph {
             return;
         }
 
+        if verbose {
+            eprintln!("\n[apply_ordering] Received ordering with {} handles:", ordering.len());
+            for (i, handle) in ordering.iter().enumerate() {
+                eprintln!("  Position {}: Node {}{}",
+                         i, handle.node_id(),
+                         if handle.is_reverse() { "-" } else { "+" });
+            }
+        }
+
         // Create old to new ID mapping
         let mut old_to_new = HashMap::new();
         for (new_idx, handle) in ordering.iter().enumerate() {
             old_to_new.insert(handle.node_id(), new_idx + 1); // 1-based IDs
+        }
+
+        if verbose {
+            eprintln!("\n[apply_ordering] Old-to-new ID mapping:");
+            let mut mapping_vec: Vec<_> = old_to_new.iter().collect();
+            mapping_vec.sort_by_key(|(old_id, _)| **old_id);
+            for (old_id, new_id) in mapping_vec {
+                eprintln!("  {} -> {}", old_id, new_id);
+            }
         }
 
         // Update nodes
@@ -1609,15 +1685,30 @@ impl BidirectedGraph {
 
         // Update paths
         for path in &mut self.paths {
+            if verbose {
+                eprintln!("\n[apply_ordering] Updating path '{}':", path.name);
+                eprintln!("  Before: {:?}",
+                         path.steps.iter()
+                             .map(|h| format!("{}{}", h.node_id(), if h.is_reverse() { "-" } else { "+" }))
+                             .collect::<Vec<_>>());
+            }
+
             for handle in &mut path.steps {
                 if let Some(&new_id) = old_to_new.get(&handle.node_id()) {
                     *handle = Handle::new(new_id, handle.is_reverse());
                 }
             }
+
+            if verbose {
+                eprintln!("  After:  {:?}",
+                         path.steps.iter()
+                             .map(|h| format!("{}{}", h.node_id(), if h.is_reverse() { "-" } else { "+" }))
+                             .collect::<Vec<_>>());
+            }
         }
 
         if verbose {
-            println!("Applied ordering: renumbered {} nodes", old_to_new.len());
+            eprintln!("\n[apply_ordering] Applied ordering: renumbered {} nodes\n", old_to_new.len());
         }
     }
 }
