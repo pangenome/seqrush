@@ -1438,39 +1438,27 @@ impl BidirectedGraph {
         let mut masked_edges = HashSet::new();
 
         // Initialize with heads or tails if requested
-        // Important: Only add ONE head at a time to maintain path ordering
+        // ODGI: "Dump all the heads into the oriented set, rather than having them as seeds."
+        // This ensures we process all heads before any cycle-breaking seeds
         if use_heads {
-            // Get heads in path-order (already sorted by find_head_nodes)
             let heads = self.find_head_nodes();
-            if !heads.is_empty() {
-                // Start with the first head (earliest in paths)
-                let first_head = heads[0];
-                if verbose {
-                    eprintln!("[exact_odgi] Starting with head: node {}", first_head.node_id());
-                }
-                s.insert(first_head);
-                unvisited.remove(&first_head);
-                unvisited.remove(&first_head.flip());
-
-                // Keep remaining heads as seeds for later
-                for handle in heads.into_iter().skip(1) {
-                    seeds.push(handle);
-                }
+            if verbose && !heads.is_empty() {
+                eprintln!("[exact_odgi] Adding {} head nodes to ready set", heads.len());
+            }
+            for head in heads {
+                s.insert(head);
+                unvisited.remove(&head);
+                unvisited.remove(&head.flip());
             }
         } else if use_tails {
             let tails = self.find_tail_nodes();
-            if !tails.is_empty() {
-                let first_tail = tails[0];
-                if verbose {
-                    eprintln!("[exact_odgi] Starting with tail: node {}", first_tail.node_id());
-                }
-                s.insert(first_tail);
-                unvisited.remove(&first_tail);
-                unvisited.remove(&first_tail.flip());
-
-                for handle in tails.into_iter().skip(1) {
-                    seeds.push(handle);
-                }
+            if verbose && !tails.is_empty() {
+                eprintln!("[exact_odgi] Adding {} tail nodes to ready set", tails.len());
+            }
+            for tail in tails {
+                s.insert(tail);
+                unvisited.remove(&tail);
+                unvisited.remove(&tail.flip());
             }
         }
         
