@@ -143,18 +143,6 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
         eprintln!("[ygs_sort] After grooming: {} nodes", graph.nodes.len());
     }
 
-    // TODO: Step 3 (topological sort) is currently disabled
-    //
-    // PROBLEM IDENTIFIED:
-    // - Topological sort creates a NEW ordering based on edges, destroying SGD's ordering
-    // - Even after grooming, our topo sort degrades performance (76.3% → 64.8%)
-    // - ODGI's topo sort IMPROVES performance after grooming (77.4% → 85.0%)
-    //
-    // CURRENT STATUS:
-    // - Using SGD + groom only
-    // - Need to fix topological sort to preserve SGD ordering
-
-    /* DISABLED - topological sort
     // Step 3: s - Topological sort (heads only)
     if params.verbose {
         eprintln!("[ygs_sort] === Step 3/3: Topological sort (s) ===");
@@ -165,12 +153,11 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
     graph.apply_ordering(topo_order, params.verbose);
 
     if params.verbose {
-        eprintln!("[ygs_sort] After topological sort: {} nodes", graph.nodes.len());
+        eprintln!("[ygs_sort] After topological sort: {} nodes", graph.node_count());
     }
-    */
 
     if params.verbose {
-        eprintln!("[ygs_sort] === Ygs pipeline complete (SGD + groom, topo disabled) ===");
+        eprintln!("[ygs_sort] === Ygs pipeline complete (Y + g + s) ===");
     }
 }
 
