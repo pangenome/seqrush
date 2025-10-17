@@ -4,9 +4,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use sha2::{Sha256, Digest};
 
 /// A bidirected graph that extends the basic Graph with orientation support
+/// Uses Vec for nodes (indexed by node ID) for stable iteration order like ODGI
 #[derive(Clone)]
 pub struct BidirectedGraph {
-    pub nodes: HashMap<usize, BiNode>,
+    pub nodes: Vec<Option<BiNode>>,  // Index = node ID, stable iteration order
     pub edges: HashSet<BiEdge>,
     pub paths: Vec<BiPath>,
 }
@@ -20,13 +21,17 @@ impl Default for BidirectedGraph {
 impl BidirectedGraph {
     /// Apply a node ID remapping to renumber nodes in the graph
     pub fn apply_node_id_mapping(&mut self, mapping: &HashMap<usize, usize>) {
-        // Create new nodes with remapped IDs
-        let mut new_nodes = HashMap::new();
-        for (old_id, node) in &self.nodes {
-            let new_id = mapping.get(old_id).copied().unwrap_or(*old_id);
-            let mut new_node = node.clone();
-            new_node.id = new_id;
-            new_nodes.insert(new_id, new_node);
+        // Create new nodes vec with remapped IDs
+        let max_new_id = mapping.values().max().copied().unwrap_or(0);
+        let mut new_nodes = vec![None; max_new_id + 1];
+
+        for (old_id, node_opt) in self.nodes.iter().enumerate() {
+            if let Some(node) = node_opt {
+                let new_id = mapping.get(&old_id).copied().unwrap_or(old_id);
+                let mut new_node = node.clone();
+                new_node.id = new_id;
+                new_nodes[new_id] = Some(new_node);
+            }
         }
         self.nodes = new_nodes;
 
@@ -68,40 +73,27 @@ impl BidirectedGraph {
     /// Compact the graph by merging linear chains of nodes
     /// Renumber nodes to be sequential starting from 1
     pub fn renumber_nodes_sequentially(&mut self) {
-        eprintln!("[VALIDATION] Before renumbering - checking for issues...");
-        self.validate_paths("before renumbering");
-
         let mut old_to_new: HashMap<usize, usize> = HashMap::new();
         let mut new_id = 1;
 
         // Create mapping from old to new IDs
-        let mut old_ids: Vec<usize> = self.nodes.keys().cloned().collect();
-        old_ids.sort();
-
-        for old_id in old_ids {
-            old_to_new.insert(old_id, new_id);
-            new_id += 1;
+        for (old_id, node_opt) in self.nodes.iter().enumerate() {
+            if node_opt.is_some() {
+                old_to_new.insert(old_id, new_id);
+                new_id += 1;
+            }
         }
 
         // Apply the renumbering
         self.apply_node_id_mapping(&old_to_new);
-
-        eprintln!("[VALIDATION] After renumbering - checking for issues...");
-        self.validate_paths("after renumbering");
     }
 
     pub fn compact(&mut self) {
         let mut compacted = true;
-        let mut iteration = 0;
-
-        // Validate before compaction
-        self.validate_graph_consistency("before compaction");
-        self.validate_paths("before compaction");
 
         // Keep compacting until no more changes
         while compacted {
             compacted = false;
-            iteration += 1;
 
             // Find simple components (linear chains)
             let components = self.find_simple_components();
@@ -110,9 +102,6 @@ impl BidirectedGraph {
             for component in components {
                 if component.len() >= 2 && self.merge_component_v2(&component) {
                     compacted = true;
-                    // Validate after each merge
-                    self.validate_graph_consistency(&format!("after merge in iteration {}", iteration));
-                    self.validate_paths(&format!("after merge in iteration {}", iteration));
                 }
             }
 
@@ -120,10 +109,6 @@ impl BidirectedGraph {
                 break;
             }
         }
-
-        // Final validation
-        self.validate_graph_consistency("after compaction");
-        self.validate_paths("after compaction");
     }
 
     /// Find simple components (linear chains that can be merged)
@@ -218,8 +203,10 @@ impl BidirectedGraph {
         // Find linear chains
         for handle in self
             .nodes
-            .keys()
-            .flat_map(|&id| vec![Handle::forward(id), Handle::reverse(id)])
+            .iter()
+            .enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .flat_map(|id| vec![Handle::forward(id), Handle::reverse(id)])
         {
             if visited.contains(&handle) {
                 continue;
@@ -294,8 +281,6 @@ impl BidirectedGraph {
             return false;
         }
 
-        eprintln!("[COMPACT DEBUG] Attempting to merge chain: {:?}",
-                  handles.iter().map(|h| format!("{}{}", h.node_id(), if h.is_reverse() { "-" } else { "+" })).collect::<Vec<_>>());
 
         // First, build a complete mapping of what needs to be replaced
         // This includes both the handles in the chain and their flipped versions
@@ -304,7 +289,7 @@ impl BidirectedGraph {
         // Create new sequence by concatenating
         let mut new_sequence = Vec::new();
         for &handle in handles {
-            if let Some(node) = self.nodes.get(&handle.node_id()) {
+            if let Some(node) = self.nodes.get(handle.node_id()).and_then(|n| n.as_ref()) {
                 if handle.is_reverse() {
                     new_sequence.extend(crate::bidirected_graph::reverse_complement(&node.sequence));
                 } else {
@@ -373,8 +358,6 @@ impl BidirectedGraph {
                     
                     // If we get here, the handle appears but not as part of a complete chain
                     // Cannot compact this chain
-                    eprintln!("[COMPACT DEBUG] Chain validation FAILED: handle {} appears individually in path {} at position {}",
-                             path.steps[i], path.name, i);
                     return false;
                 }
                 i += 1;
@@ -382,7 +365,6 @@ impl BidirectedGraph {
         }
         
         // All paths validated - proceed with the merge
-        eprintln!("[COMPACT DEBUG] Validation passed, creating new node {}", new_node_id);
         self.add_node(new_node_id, new_sequence);
 
         // Update all paths
@@ -431,12 +413,6 @@ impl BidirectedGraph {
                 // Not part of a chain, keep as is
                 new_steps.push(path.steps[i]);
                 i += 1;
-            }
-
-            let new_step_count = new_steps.len();
-            if replacements > 0 {
-                eprintln!("[COMPACT DEBUG]   Path {}: {} steps -> {} steps ({} chain replacements)",
-                         path.name, old_step_count, new_step_count, replacements);
             }
 
             path.steps = new_steps;
@@ -502,14 +478,11 @@ impl BidirectedGraph {
 
         self.edges = new_edges;
 
-        // Remove old nodes
-        eprintln!("[COMPACT DEBUG] Removing {} old nodes from chain", handles.len());
+        // Remove old nodes (set to None in Vec)
         for &handle in handles {
             let node_id = handle.node_id();
-            if self.nodes.remove(&node_id).is_some() {
-                eprintln!("[COMPACT DEBUG]   Removed node {}", node_id);
-            } else {
-                eprintln!("[COMPACT DEBUG]   WARNING: Node {} was already deleted!", node_id);
+            if node_id < self.nodes.len() {
+                self.nodes[node_id] = None;
             }
         }
 
@@ -573,7 +546,7 @@ impl BidirectedGraph {
         // Create new sequence by concatenating
         let mut new_sequence = Vec::new();
         for &handle in handles {
-            if let Some(node) = self.nodes.get(&handle.node_id()) {
+            if let Some(node) = self.nodes.get(handle.node_id()).and_then(|n| n.as_ref()) {
                 if handle.is_reverse() {
                     new_sequence
                         .extend(crate::bidirected_graph::reverse_complement(&node.sequence));
@@ -695,9 +668,12 @@ impl BidirectedGraph {
             path.steps = new_steps;
         }
 
-        // Remove old nodes
+        // Remove old nodes (set to None in Vec)
         for &handle in handles {
-            self.nodes.remove(&handle.node_id());
+            let node_id = handle.node_id();
+            if node_id < self.nodes.len() {
+                self.nodes[node_id] = None;
+            }
         }
 
         // Remove old edges
@@ -714,11 +690,11 @@ impl BidirectedGraph {
     }
 
     fn next_node_id(&self) -> usize {
-        self.nodes.keys().max().copied().unwrap_or(0) + 1
+        self.nodes.len()
     }
     pub fn new() -> Self {
         BidirectedGraph {
-            nodes: HashMap::new(),
+            nodes: Vec::new(),
             edges: HashSet::new(),
             paths: Vec::new(),
         }
@@ -740,12 +716,15 @@ impl BidirectedGraph {
 
     /// Get total sequence length in the graph
     pub fn total_sequence_length(&self) -> usize {
-        self.nodes.values().map(|node| node.sequence.len()).sum()
+        self.nodes.iter()
+            .filter_map(|n| n.as_ref())
+            .map(|node| node.sequence.len())
+            .sum()
     }
 
     /// Get the number of nodes in the graph
     pub fn node_count(&self) -> usize {
-        self.nodes.len()
+        self.nodes.iter().filter(|n| n.is_some()).count()
     }
 
     /// Convert from the old Graph format to BidirectedGraph
@@ -759,7 +738,7 @@ impl BidirectedGraph {
                 sequence: node.sequence,
                 rank: Some(node.rank as u64),
             };
-            bi_graph.nodes.insert(id, bi_node);
+            bi_graph.add_node(id, bi_node.sequence);
         }
 
         // Convert edges (all as forward-to-forward for now)
@@ -785,13 +764,15 @@ impl BidirectedGraph {
         let mut graph = Graph::new();
 
         // Convert nodes
-        for (id, bi_node) in &self.nodes {
-            let node = Node {
-                id: *id,
-                sequence: bi_node.sequence.clone(),
-                rank: bi_node.rank.unwrap_or(0) as f64,
-            };
-            graph.nodes.insert(*id, node);
+        for (id, node_opt) in self.nodes.iter().enumerate() {
+            if let Some(bi_node) = node_opt {
+                let node = Node {
+                    id,
+                    sequence: bi_node.sequence.clone(),
+                    rank: bi_node.rank.unwrap_or(0) as f64,
+                };
+                graph.nodes.insert(id, node);
+            }
         }
 
         // Convert edges - for now we only include forward-to-forward edges
@@ -821,7 +802,11 @@ impl BidirectedGraph {
 
     /// Add a node to the graph
     pub fn add_node(&mut self, id: usize, sequence: Vec<u8>) {
-        self.nodes.insert(id, BiNode::new(id, sequence));
+        // Resize vector if needed to accommodate this ID
+        if id >= self.nodes.len() {
+            self.nodes.resize(id + 1, None);
+        }
+        self.nodes[id] = Some(BiNode::new(id, sequence));
     }
 
     /// Add an edge to the graph
@@ -842,7 +827,8 @@ impl BidirectedGraph {
     /// Get sequence for a handle (forward or reverse complement)
     pub fn get_sequence(&self, handle: Handle) -> Option<Vec<u8>> {
         self.nodes
-            .get(&handle.node_id())
+            .get(handle.node_id())
+            .and_then(|n| n.as_ref())
             .map(|node| node.get_sequence(handle.is_reverse()))
     }
 
@@ -896,11 +882,8 @@ impl BidirectedGraph {
         writeln!(writer, "H\tVN:Z:1.0")?;
 
         // Write segments (nodes)
-        let mut node_ids: Vec<_> = self.nodes.keys().cloned().collect();
-        node_ids.sort();
-
-        for node_id in node_ids {
-            if let Some(node) = self.nodes.get(&node_id) {
+        for (node_id, node_opt) in self.nodes.iter().enumerate() {
+            if let Some(node) = node_opt {
                 let seq_str = String::from_utf8_lossy(&node.sequence);
                 writeln!(writer, "S\t{}\t{}", node_id, seq_str)?;
             }
@@ -947,19 +930,22 @@ impl BidirectedGraph {
 
         // Check all edges reference existing nodes
         for edge in &self.edges {
-            if !self.nodes.contains_key(&edge.from.node_id()) {
-                errors.push(format!("Edge references non-existent node: {} (from)", edge.from.node_id()));
+            let from_id = edge.from.node_id();
+            let to_id = edge.to.node_id();
+            if from_id >= self.nodes.len() || self.nodes[from_id].is_none() {
+                errors.push(format!("Edge references non-existent node: {} (from)", from_id));
             }
-            if !self.nodes.contains_key(&edge.to.node_id()) {
-                errors.push(format!("Edge references non-existent node: {} (to)", edge.to.node_id()));
+            if to_id >= self.nodes.len() || self.nodes[to_id].is_none() {
+                errors.push(format!("Edge references non-existent node: {} (to)", to_id));
             }
         }
 
         // Check all path steps reference existing nodes
         for path in &self.paths {
             for handle in &path.steps {
-                if !self.nodes.contains_key(&handle.node_id()) {
-                    errors.push(format!("Path {} references non-existent node: {}", path.name, handle.node_id()));
+                let node_id = handle.node_id();
+                if node_id >= self.nodes.len() || self.nodes[node_id].is_none() {
+                    errors.push(format!("Path {} references non-existent node: {}", path.name, node_id));
                 }
             }
         }
@@ -1003,16 +989,9 @@ impl BidirectedGraph {
     /// Validate paths - check basic statistics and optionally verify hashes haven't changed
     /// NOTE: Repeated consecutive nodes ARE VALID in seqwish/odgi graphs!
     /// They represent structural variation (indels, duplications, etc.)
-    pub fn validate_paths(&self, phase: &str) -> bool {
-        eprintln!("[VALIDATION] At phase '{}': {} paths, {} nodes, {} edges",
-                  phase, self.paths.len(), self.nodes.len(), self.edges.len());
-
+    pub fn validate_paths(&self, _phase: &str) -> bool {
         // Compute and display path hashes
-        let hashes = self.compute_all_path_hashes();
-        eprintln!("[VALIDATION] Path hashes at '{}':", phase);
-        for (name, hash) in &hashes {
-            eprintln!("  {}: {}...", name, &hash[..16]);
-        }
+        let _hashes = self.compute_all_path_hashes();
 
         // Just print statistics for now - repeated nodes are actually valid!
         let mut has_repeats = false;
@@ -1043,11 +1022,10 @@ impl BidirectedGraph {
     }
 
     /// Validate that path hashes match expected values
-    pub fn validate_path_hashes(&self, expected_hashes: &HashMap<String, String>, phase: &str) -> bool {
+    pub fn validate_path_hashes(&self, expected_hashes: &HashMap<String, String>, _phase: &str) -> bool {
         let current_hashes = self.compute_all_path_hashes();
         let mut all_match = true;
 
-        eprintln!("[VALIDATION] Checking path sequence integrity at '{}':", phase);
         for (name, expected_hash) in expected_hashes {
             if let Some(current_hash) = current_hashes.get(name) {
                 if current_hash != expected_hash {
@@ -1121,9 +1099,11 @@ impl BidirectedGraph {
         let mut idx = 0;
         
         // Collect all node IDs in sorted order for deterministic behavior
-        let mut node_ids: Vec<_> = self.nodes.keys().copied().collect();
-        node_ids.sort();
-        
+        let node_ids: Vec<_> = self.nodes.iter()
+            .enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .collect();
+
         for node_id in &node_ids {
             // Forward orientation
             let fwd = Handle::forward(*node_id);
@@ -1337,7 +1317,10 @@ impl BidirectedGraph {
     pub fn find_head_nodes(&self) -> Vec<Handle> {
         let mut heads = Vec::new();
 
-        for &node_id in self.nodes.keys() {
+        for (node_id, node_opt) in self.nodes.iter().enumerate() {
+            if node_opt.is_none() {
+                continue;
+            }
             // Check if this node has ANY incoming edges (to either orientation)
             // A head node has no incoming edges to either its forward or reverse orientation
             let mut has_incoming = false;
@@ -1375,8 +1358,11 @@ impl BidirectedGraph {
     /// Find all nodes with no edges on their right sides (tails)
     pub fn find_tail_nodes(&self) -> Vec<Handle> {
         let mut tails = Vec::new();
-        
-        for &node_id in self.nodes.keys() {
+
+        for (node_id, node_opt) in self.nodes.iter().enumerate() {
+            if node_opt.is_none() {
+                continue;
+            }
             let forward_handle = Handle::forward(node_id);
             let mut has_outgoing = false;
             
@@ -1425,10 +1411,12 @@ impl BidirectedGraph {
 
         // Unvisited - track which handles haven't been processed yet
         let mut unvisited = HashSet::new();
-        for &node_id in self.nodes.keys() {
-            // Both orientations start as unvisited
-            unvisited.insert(Handle::forward(node_id));
-            unvisited.insert(Handle::reverse(node_id));
+        for (node_id, node_opt) in self.nodes.iter().enumerate() {
+            if node_opt.is_some() {
+                // Both orientations start as unvisited
+                unvisited.insert(Handle::forward(node_id));
+                unvisited.insert(Handle::reverse(node_id));
+            }
         }
 
         // Seeds for breaking cycles - keep as Vec to preserve path-ordered heads
@@ -1649,12 +1637,17 @@ impl BidirectedGraph {
         }
 
         // Update nodes
-        let mut new_nodes = HashMap::new();
-        for (old_id, mut node) in self.nodes.drain() {
-            if let Some(&new_id) = old_to_new.get(&old_id) {
-                node.id = new_id;
-                node.rank = Some((new_id - 1) as u64); // 0-based rank
-                new_nodes.insert(new_id, node);
+        let max_new_id = old_to_new.values().max().copied().unwrap_or(0);
+        let mut new_nodes = vec![None; max_new_id + 1];
+
+        for (old_id, node_opt) in self.nodes.iter().enumerate() {
+            if let Some(node) = node_opt {
+                if let Some(&new_id) = old_to_new.get(&old_id) {
+                    let mut new_node = node.clone();
+                    new_node.id = new_id;
+                    new_node.rank = Some((new_id - 1) as u64); // 0-based rank
+                    new_nodes[new_id] = Some(new_node);
+                }
             }
         }
         self.nodes = new_nodes;
@@ -1744,7 +1737,7 @@ mod tests {
         graph.add_edge(Handle::forward(1), Handle::forward(2));
         graph.add_edge(Handle::forward(1), Handle::reverse(2));
 
-        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.node_count(), 2);
         assert_eq!(graph.edges.len(), 2);
     }
 

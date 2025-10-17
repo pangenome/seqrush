@@ -7,16 +7,103 @@ use crate::bidirected_ops::BidirectedGraph;
 use std::collections::{HashSet, VecDeque};
 
 impl BidirectedGraph {
+    /// Analyze orientation preferences from paths
+    /// Returns (forward_count, reverse_count) for each node
+    fn analyze_orientation_preferences(&self) -> std::collections::HashMap<usize, (usize, usize)> {
+        let mut preferences = std::collections::HashMap::new();
+
+        for path in &self.paths {
+            for &handle in &path.steps {
+                let entry = preferences.entry(handle.node_id()).or_insert((0, 0));
+                if handle.is_reverse() {
+                    entry.1 += 1; // reverse count
+                } else {
+                    entry.0 += 1; // forward count
+                }
+            }
+        }
+
+        preferences
+    }
+
+    /// Count how many paths use each edge (coverage)
+    /// Returns map of (from_handle, to_handle) -> path_count
+    fn count_edge_coverage(&self) -> std::collections::HashMap<(Handle, Handle), usize> {
+        let mut coverage = std::collections::HashMap::new();
+
+        for path in &self.paths {
+            for i in 0..path.steps.len().saturating_sub(1) {
+                let from = path.steps[i];
+                let to = path.steps[i + 1];
+                *coverage.entry((from, to)).or_insert(0) += 1;
+            }
+        }
+
+        coverage
+    }
+
     /// Apply grooming to orient the graph consistently
     /// This explores the graph via BFS/DFS from seed nodes and flips nodes
     /// as needed to maintain consistent orientation along paths
     /// Returns handles in their CURRENT order (like ODGI), just with flipped orientations
     pub fn groom(&mut self, use_bfs: bool, verbose: bool) -> Vec<Handle> {
+        self.groom_with_mode(use_bfs, false, verbose)
+    }
+
+    /// Apply grooming with explicit mode selection
+    /// use_bfs: if true, use BFS; if false and use_coverage_dfs is false, use regular DFS
+    /// use_coverage_dfs: if true, use coverage-weighted DFS (overrides use_bfs)
+    pub fn groom_with_mode(&mut self, use_bfs: bool, use_coverage_dfs: bool, verbose: bool) -> Vec<Handle> {
         if verbose {
             eprintln!("[groom] Starting grooming with {} nodes", self.nodes.len());
+            if use_coverage_dfs {
+                eprintln!("[groom] Using coverage-weighted DFS mode");
+            } else if use_bfs {
+                eprintln!("[groom] Using BFS mode");
+            } else {
+                eprintln!("[groom] Using regular DFS mode");
+            }
         }
 
-        // Find seed nodes - start with head nodes
+        // Analyze orientation preferences from paths (majority-based approach)
+        let preferences = self.analyze_orientation_preferences();
+
+        // Count edge coverage if using coverage-weighted DFS
+        let edge_coverage = if use_coverage_dfs {
+            self.count_edge_coverage()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        if verbose {
+            let total_nodes = preferences.len();
+            let unanimous = preferences.values()
+                .filter(|(fwd, rev)| *fwd == 0 || *rev == 0)
+                .count();
+            let conflicts = total_nodes - unanimous;
+            eprintln!("[groom] Orientation analysis: {} unanimous, {} conflicts",
+                     unanimous, conflicts);
+
+            // Show details of conflicts
+            if conflicts > 0 && conflicts <= 10 {
+                eprintln!("[groom] Conflict nodes:");
+                let mut conflict_nodes: Vec<_> = preferences.iter()
+                    .filter(|(_, (fwd, rev))| *fwd > 0 && *rev > 0)
+                    .collect();
+                conflict_nodes.sort_by_key(|(node_id, _)| **node_id);
+                for (node_id, (fwd, rev)) in conflict_nodes {
+                    eprintln!("[groom]   Node {}: {} forward, {} reverse (majority: {})",
+                             node_id, fwd, rev,
+                             if fwd > rev { "forward" } else { "reverse" });
+                }
+            }
+
+            if use_coverage_dfs {
+                eprintln!("[groom] Counted coverage for {} edges", edge_coverage.len());
+            }
+        }
+
+        // Find seed nodes - use graph structure as-is (like ODGI)
         let seeds = self.find_head_nodes();
 
         if verbose {
@@ -27,9 +114,15 @@ impl BidirectedGraph {
         let mut visited = HashSet::new();
         let mut flipped = HashSet::new();
 
-        // If we have no heads, pick the first node as seed
+        // If we have no heads, pick first unvisited node (like ODGI)
         let mut current_seeds = if seeds.is_empty() {
-            if let Some(&node_id) = self.nodes.keys().min() {
+            // Pick first node in forward orientation
+            if let Some(node_id) = self.nodes.iter().enumerate()
+                .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+                .min() {
+                if verbose {
+                    eprintln!("[groom] No heads found, using first node {}", node_id);
+                }
                 vec![Handle::forward(node_id)]
             } else {
                 vec![]
@@ -42,12 +135,17 @@ impl BidirectedGraph {
         let mut component_count = 0;
         while visited.len() < self.nodes.len() {
             if current_seeds.is_empty() {
-                // Find an unvisited node as new seed
-                for &node_id in self.nodes.keys() {
+                // Find an unvisited node as new seed (forward orientation, like ODGI)
+                for (node_id, node_opt) in self.nodes.iter().enumerate() {
+                    if node_opt.is_none() {
+                        continue;
+                    }
                     if !visited.contains(&node_id) {
-                        current_seeds.push(Handle::forward(node_id));
+                        let seed = Handle::forward(node_id);  // Always use forward (like ODGI)
+
+                        current_seeds.push(seed);
                         if verbose {
-                            eprintln!("[groom] Starting new component with node {}", node_id);
+                            eprintln!("[groom] Starting new component with node {}+", node_id);
                         }
                         component_count += 1;
                         break;
@@ -59,8 +157,10 @@ impl BidirectedGraph {
             }
 
             let visited_before = visited.len();
-            if use_bfs {
-                self.groom_bfs(&current_seeds, &mut visited, &mut flipped);
+            if use_coverage_dfs {
+                self.groom_coverage_weighted_dfs(&current_seeds, &mut visited, &mut flipped, &edge_coverage, verbose);
+            } else if use_bfs {
+                self.groom_bfs_majority(&current_seeds, &mut visited, &mut flipped, &preferences, verbose);
             } else {
                 self.groom_dfs(&current_seeds, &mut visited, &mut flipped);
             }
@@ -75,7 +175,9 @@ impl BidirectedGraph {
 
         // Build the final handle order in CURRENT NODE ORDER (like ODGI)
         // Get nodes in sorted order
-        let mut node_ids: Vec<_> = self.nodes.keys().copied().collect();
+        let mut node_ids: Vec<_> = self.nodes.iter().enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .collect();
         node_ids.sort();
 
         let mut final_order = Vec::new();
@@ -93,6 +195,121 @@ impl BidirectedGraph {
         }
 
         final_order
+    }
+
+    /// Find head nodes and orient them according to majority preference
+    fn find_head_nodes_with_majority(&self, preferences: &std::collections::HashMap<usize, (usize, usize)>) -> Vec<Handle> {
+        let heads = self.find_head_nodes();
+
+        // Re-orient based on majority preference
+        heads.into_iter().map(|h| {
+            let node_id = h.node_id();
+            let majority_forward = preferences.get(&node_id)
+                .map(|(fwd, rev)| fwd >= rev)
+                .unwrap_or(true);
+
+            if majority_forward {
+                Handle::forward(node_id)
+            } else {
+                Handle::reverse(node_id)
+            }
+        }).collect()
+    }
+
+    /// Pick seeds by strongest orientation preference
+    fn pick_seeds_by_preference(&self, preferences: &std::collections::HashMap<usize, (usize, usize)>,
+                                verbose: bool) -> Vec<Handle> {
+        // Find node with strongest preference (largest difference between fwd and rev)
+        let best = preferences.iter()
+            .max_by_key(|(_, (fwd, rev))| {
+                if fwd > rev { fwd - rev } else { rev - fwd }
+            });
+
+        if let Some((node_id, (fwd, rev))) = best {
+            let majority_forward = fwd >= rev;
+            if verbose {
+                eprintln!("[groom] No heads found, using node {} with strongest preference ({} fwd, {} rev)",
+                         node_id, fwd, rev);
+            }
+            vec![if majority_forward {
+                Handle::forward(*node_id)
+            } else {
+                Handle::reverse(*node_id)
+            }]
+        } else if let Some(node_id) = self.nodes.iter().enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .min() {
+            if verbose {
+                eprintln!("[groom] No preferences found, using first node {}", node_id);
+            }
+            vec![Handle::forward(node_id)]
+        } else {
+            vec![]
+        }
+    }
+
+    /// BFS-based grooming - ODGI greedy algorithm
+    /// Just uses edge orientation on first visit, no fancy majority voting
+    fn groom_bfs_majority(&self, seeds: &[Handle], visited: &mut HashSet<usize>,
+                         flipped: &mut HashSet<usize>,
+                         preferences: &std::collections::HashMap<usize, (usize, usize)>,
+                         verbose: bool) {
+        let mut queue = VecDeque::new();
+        let verbose_groom = std::env::var("SEQRUSH_GROOM_DEBUG").is_ok();
+
+        // Initialize queue with seeds
+        for &seed in seeds {
+            if !visited.contains(&seed.node_id()) {
+                queue.push_back(seed);
+                visited.insert(seed.node_id());
+
+                if verbose_groom {
+                    eprintln!("[groom_bfs] Seed node {} orientation {}",
+                             seed.node_id(), if seed.is_reverse() { "REVERSE" } else { "FORWARD" });
+                }
+
+                // ODGI logic: flip if we visit via reverse orientation
+                if seed.is_reverse() {
+                    flipped.insert(seed.node_id());
+                    if verbose_groom {
+                        eprintln!("[groom_bfs]   -> Marking {} as FLIPPED (seed was reverse)", seed.node_id());
+                    }
+                }
+            }
+        }
+
+        // BFS traversal - pure ODGI greedy algorithm
+        while let Some(current) = queue.pop_front() {
+            // Get edges from this handle and sort them for deterministic iteration (like ODGI)
+            let mut matching_edges: Vec<_> = self.edges.iter()
+                .filter(|e| e.from == current)
+                .collect();
+            matching_edges.sort();  // Use BiEdge's Ord trait for deterministic order
+
+            for edge in matching_edges {
+                let next = edge.to;
+                if !visited.contains(&next.node_id()) {
+                    visited.insert(next.node_id());
+
+                    if verbose_groom {
+                        eprintln!("[groom_bfs] From {}{}  ->  {}{}",
+                                 current.node_id(), if current.is_reverse() { "-" } else { "+" },
+                                 next.node_id(), if next.is_reverse() { "-" } else { "+" });
+                    }
+
+                    // ODGI greedy logic: mark as flipped if we reach it via reverse orientation
+                    if next.is_reverse() {
+                        flipped.insert(next.node_id());
+                        if verbose_groom {
+                            eprintln!("[groom_bfs]   -> Marking {} as FLIPPED (reached via reverse)", next.node_id());
+                        }
+                    }
+
+                    // Continue BFS from the handle we arrived at
+                    queue.push_back(next);
+                }
+            }
+        }
     }
 
     /// BFS-based grooming with traversal order tracking
@@ -202,6 +419,74 @@ impl BidirectedGraph {
         self.groom_dfs_with_order(seeds, visited, flipped, &mut _order);
     }
 
+    /// Coverage-weighted DFS grooming
+    /// Prioritizes edges with higher coverage (used by more paths)
+    /// This naturally follows the "main bundle" and handles hairpins better
+    fn groom_coverage_weighted_dfs(&self, seeds: &[Handle], visited: &mut HashSet<usize>,
+                                   flipped: &mut HashSet<usize>,
+                                   edge_coverage: &std::collections::HashMap<(Handle, Handle), usize>,
+                                   verbose: bool) {
+        let mut stack = Vec::new();
+        let verbose_groom = std::env::var("SEQRUSH_GROOM_DEBUG").is_ok();
+
+        // Initialize stack with seeds
+        for &seed in seeds {
+            stack.push(seed);
+        }
+
+        // DFS traversal
+        while let Some(current) = stack.pop() {
+            if visited.contains(&current.node_id()) {
+                continue;
+            }
+
+            visited.insert(current.node_id());
+
+            if verbose_groom {
+                eprintln!("[groom_cov_dfs] Visiting node {}{}",
+                         current.node_id(),
+                         if current.is_reverse() { "-" } else { "+" });
+            }
+
+            // ODGI logic: flip if we visit via reverse orientation
+            if current.is_reverse() {
+                flipped.insert(current.node_id());
+                if verbose_groom {
+                    eprintln!("[groom_cov_dfs]   -> Marking {} as FLIPPED", current.node_id());
+                }
+            }
+
+            // Get outgoing edges and sort by coverage (highest first)
+            let mut outgoing: Vec<_> = self.edges.iter()
+                .filter(|e| e.from == current)
+                .map(|e| {
+                    let coverage = edge_coverage.get(&(e.from, e.to)).copied().unwrap_or(0);
+                    (e.to, coverage)
+                })
+                .collect();
+
+            // Sort by coverage descending, then by node ID for determinism
+            outgoing.sort_by_key(|(handle, cov)| (std::cmp::Reverse(*cov), handle.node_id(), handle.is_reverse()));
+
+            if verbose_groom && !outgoing.is_empty() {
+                eprintln!("[groom_cov_dfs]   Outgoing edges (sorted by coverage):");
+                for (next, cov) in &outgoing {
+                    eprintln!("[groom_cov_dfs]     -> {}{} (coverage: {})",
+                             next.node_id(),
+                             if next.is_reverse() { "-" } else { "+" },
+                             cov);
+                }
+            }
+
+            // Push in reverse order so highest-coverage is processed first (DFS stack)
+            for (next_handle, _) in outgoing.into_iter().rev() {
+                if !visited.contains(&next_handle.node_id()) {
+                    stack.push(next_handle);
+                }
+            }
+        }
+    }
+
     /// Apply grooming then topological sort
     pub fn groom_and_sort(&mut self, verbose: bool) {
         if verbose {
@@ -237,11 +522,11 @@ impl BidirectedGraph {
         }
         self.apply_exact_odgi_ordering(false);
 
-        // Step 2: Apply grooming
+        // Step 2: Apply grooming with coverage-weighted DFS
         if verbose {
-            eprintln!("[sort_groom_sort] Grooming after first sort");
+            eprintln!("[sort_groom_sort] Grooming after first sort (using coverage-weighted DFS)");
         }
-        let groomed_order = self.groom(true, false); // Use BFS
+        let groomed_order = self.groom_with_mode(false, true, false); // Use coverage-weighted DFS
         self.apply_grooming(groomed_order, false);
 
         // Step 3: Final topological sort
@@ -341,7 +626,7 @@ impl BidirectedGraph {
 
         // Flip the sequences of nodes that need flipping
         for &node_id in &node_flips {
-            if let Some(node) = self.nodes.get_mut(&node_id) {
+            if let Some(Some(node)) = self.nodes.get_mut(node_id) {
                 // Reverse complement the sequence
                 node.sequence = crate::bidirected_graph::reverse_complement(&node.sequence);
             }

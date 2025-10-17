@@ -131,8 +131,9 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
     }
 
     // Step 2: g - Groom the graph
+    // Using BFS like ODGI (simple first-visit orientation locking)
     if params.verbose {
-        eprintln!("[ygs_sort] === Step 2/3: Grooming (g) ===");
+        eprintln!("[ygs_sort] === Step 2/3: Grooming (g) - BFS ===");
     }
 
     let groomed_order = graph.groom(true, params.verbose);  // Use BFS like ODGI
@@ -142,28 +143,21 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
         eprintln!("[ygs_sort] After grooming: {} nodes", graph.nodes.len());
     }
 
+    // TODO: Step 3 (topological sort) is currently disabled
+    //
+    // PROBLEM IDENTIFIED:
+    // - Topological sort creates a NEW ordering based on edges, destroying SGD's ordering
+    // - Even after grooming, our topo sort degrades performance (76.3% → 64.8%)
+    // - ODGI's topo sort IMPROVES performance after grooming (77.4% → 85.0%)
+    //
+    // CURRENT STATUS:
+    // - Using SGD + groom only
+    // - Need to fix topological sort to preserve SGD ordering
+
+    /* DISABLED - topological sort
     // Step 3: s - Topological sort (heads only)
     if params.verbose {
         eprintln!("[ygs_sort] === Step 3/3: Topological sort (s) ===");
-        eprintln!("[ygs_sort] Graph state before topo sort:");
-        eprintln!("[ygs_sort]   Edges:");
-        let mut edges_vec: Vec<_> = graph.edges.iter().collect();
-        edges_vec.sort_by_key(|e| (e.from.node_id(), e.from.is_reverse(), e.to.node_id(), e.to.is_reverse()));
-        for edge in edges_vec {
-            eprintln!("[ygs_sort]     {} {} -> {} {}",
-                     edge.from.node_id(),
-                     if edge.from.is_reverse() { "-" } else { "+" },
-                     edge.to.node_id(),
-                     if edge.to.is_reverse() { "-" } else { "+" });
-        }
-        eprintln!("[ygs_sort]   Path steps:");
-        for path in &graph.paths {
-            for (i, step) in path.steps.iter().enumerate() {
-                eprintln!("[ygs_sort]     Step {}: Node {}{}",
-                         i, step.node_id(),
-                         if step.is_reverse() { "-" } else { "+" });
-            }
-        }
     }
 
     // use_heads=true, use_tails=false matches ODGI's 's' command
@@ -172,7 +166,11 @@ pub fn ygs_sort(graph: &mut BidirectedGraph, params: &YgsParams) {
 
     if params.verbose {
         eprintln!("[ygs_sort] After topological sort: {} nodes", graph.nodes.len());
-        eprintln!("[ygs_sort] === Ygs pipeline complete ===");
+    }
+    */
+
+    if params.verbose {
+        eprintln!("[ygs_sort] === Ygs pipeline complete (SGD + groom, topo disabled) ===");
     }
 }
 
@@ -273,7 +271,7 @@ mod tests {
         ygs_sort(&mut graph, &params);
 
         // Graph should still be valid
-        assert_eq!(graph.nodes.len(), 3);
+        assert_eq!(graph.node_count(), 3);
         assert!(graph.paths.len() > 0);
     }
 
@@ -286,21 +284,21 @@ mod tests {
             let mut g = graph.clone();
             let params = YgsParams::from_graph(&g, false, 1);
             sgd_sort_only(&mut g, params.path_sgd, false);
-            assert_eq!(g.nodes.len(), 3);
+            assert_eq!(g.node_count(), 3);
         }
 
         // Test groom only
         {
             let mut g = graph.clone();
             groom_only(&mut g, false);
-            assert_eq!(g.nodes.len(), 3);
+            assert_eq!(g.node_count(), 3);
         }
 
         // Test topological sort only
         {
             let mut g = graph.clone();
             topological_sort_only(&mut g, false);
-            assert_eq!(g.nodes.len(), 3);
+            assert_eq!(g.node_count(), 3);
         }
     }
 }
