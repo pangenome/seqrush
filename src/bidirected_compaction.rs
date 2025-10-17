@@ -1,4 +1,4 @@
-use crate::bidirected_graph::{BiEdge, BiNode, Handle};
+use crate::bidirected_graph::{BiEdge, Handle};
 use crate::bidirected_ops::BidirectedGraph;
 use std::collections::{HashMap, HashSet};
 
@@ -10,7 +10,10 @@ impl BidirectedGraph {
         let original_path_sequences = self.validate_and_save_paths()?;
 
         // Track unique original node IDs that are compacted away
-        let original_nodes: HashSet<usize> = self.nodes.keys().cloned().collect();
+        let original_nodes: HashSet<usize> = self.nodes.iter()
+            .enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .collect();
         let mut compacted_original_nodes: HashSet<usize> = HashSet::new();
         let mut iteration = 0;
 
@@ -70,12 +73,14 @@ impl BidirectedGraph {
 
             for &handle in &path.steps {
                 let node_id = handle.node_id();
-                let node = self.nodes.get(&node_id).ok_or_else(|| {
-                    format!(
-                        "Path {} references non-existent node {}",
-                        path.name, node_id
-                    )
-                })?;
+                let node = self.nodes.get(node_id)
+                    .and_then(|n| n.as_ref())
+                    .ok_or_else(|| {
+                        format!(
+                            "Path {} references non-existent node {}",
+                            path.name, node_id
+                        )
+                    })?;
 
                 if handle.is_reverse() {
                     // Reverse complement for reverse orientation
@@ -100,7 +105,10 @@ impl BidirectedGraph {
         let (inbound, outbound) = self.build_connections_from_paths();
 
         // Check each handle for perfect neighbors
-        for &node_id in self.nodes.keys() {
+        for (node_id, node_opt) in self.nodes.iter().enumerate() {
+            if node_opt.is_none() {
+                continue;
+            }
             for is_reverse in [false, true] {
                 let handle = Handle::new(node_id, is_reverse);
 
@@ -272,7 +280,7 @@ impl BidirectedGraph {
     ) -> Result<usize, String> {
         let mut nodes_compacted = 0;
         let mut handle_remapping: HashMap<Handle, Handle> = HashMap::new();
-        let mut new_node_id = self.nodes.keys().max().copied().unwrap_or(0) + 1;
+        let mut new_node_id = self.nodes.len();
         let mut actually_merged_pairs: Vec<(Handle, Handle)> = Vec::new();
 
         // First, let's see what pairs we're trying to compact
@@ -294,7 +302,7 @@ impl BidirectedGraph {
             }
 
             // Get the nodes
-            let from_node = match self.nodes.get(&from.node_id()) {
+            let from_node = match self.nodes.get(from.node_id()).and_then(|n| n.as_ref()) {
                 Some(node) => node,
                 None => {
                     if perfect_pairs.len() < 10 {
@@ -308,7 +316,7 @@ impl BidirectedGraph {
                     continue; // Node was already removed
                 }
             };
-            let to_node = match self.nodes.get(&to.node_id()) {
+            let to_node = match self.nodes.get(to.node_id()).and_then(|n| n.as_ref()) {
                 Some(node) => node,
                 None => {
                     if perfect_pairs.len() < 10 {
@@ -346,14 +354,7 @@ impl BidirectedGraph {
 
             // Create new node
             let new_handle = Handle::forward(new_node_id);
-            self.nodes.insert(
-                new_node_id,
-                BiNode {
-                    id: new_node_id,
-                    sequence: merged_sequence,
-                    rank: None,
-                },
-            );
+            self.add_node(new_node_id, merged_sequence);
 
             // Map the handles used in this merge
             handle_remapping.insert(from, new_handle);
@@ -421,7 +422,9 @@ impl BidirectedGraph {
             .filter(|nid| !used_node_ids.contains(nid))
             .collect();
         for node_id in nodes_to_remove {
-            self.nodes.remove(&node_id);
+            if node_id < self.nodes.len() {
+                self.nodes[node_id] = None;
+            }
         }
 
         // Rebuild edges from updated paths to reflect current structure
@@ -447,7 +450,7 @@ impl BidirectedGraph {
     fn apply_compaction(&mut self, ordered_groups: &[Vec<Handle>]) -> Result<usize, String> {
         let mut nodes_compacted = 0;
         let mut handle_remapping: HashMap<Handle, Handle> = HashMap::new();
-        let mut new_node_id = self.nodes.keys().max().copied().unwrap_or(0) + 1;
+        let mut new_node_id = self.nodes.len();
 
         for group in ordered_groups {
             if group.len() < 2 {
@@ -457,7 +460,9 @@ impl BidirectedGraph {
             // Create merged sequence
             let mut merged_sequence = Vec::new();
             for &handle in group {
-                let node = &self.nodes[&handle.node_id()];
+                let node = self.nodes.get(handle.node_id())
+                    .and_then(|n| n.as_ref())
+                    .ok_or_else(|| format!("Node {} not found", handle.node_id()))?;
                 if handle.is_reverse() {
                     merged_sequence.extend_from_slice(
                         &crate::bidirected_graph::reverse_complement(&node.sequence),
@@ -476,7 +481,7 @@ impl BidirectedGraph {
                     group.len()
                 );
                 for &handle in group {
-                    if let Some(node) = self.nodes.get(&handle.node_id()) {
+                    if let Some(node) = self.nodes.get(handle.node_id()).and_then(|n| n.as_ref()) {
                         eprintln!(
                             "  - node {} ({} bp, {})",
                             handle.node_id(),
@@ -489,14 +494,7 @@ impl BidirectedGraph {
 
             // Create new node
             let new_handle = Handle::forward(new_node_id);
-            self.nodes.insert(
-                new_node_id,
-                BiNode {
-                    id: new_node_id,
-                    sequence: merged_sequence,
-                    rank: None,
-                },
-            );
+            self.add_node(new_node_id, merged_sequence);
 
             // Map all handles in the group to the new handle
             // Also map their reverse complements
@@ -519,7 +517,9 @@ impl BidirectedGraph {
         let nodes_to_remove: HashSet<_> = handle_remapping.keys().map(|h| h.node_id()).collect();
 
         for node_id in nodes_to_remove {
-            self.nodes.remove(&node_id);
+            if node_id < self.nodes.len() {
+                self.nodes[node_id] = None;
+            }
         }
 
         // Update edges
@@ -579,13 +579,15 @@ impl BidirectedGraph {
             let mut current_sequence = Vec::new();
 
             for &handle in &path.steps {
-                let node = self.nodes.get(&handle.node_id()).ok_or_else(|| {
-                    format!(
-                        "Path {} references non-existent node {}",
-                        path.name,
-                        handle.node_id()
-                    )
-                })?;
+                let node = self.nodes.get(handle.node_id())
+                    .and_then(|n| n.as_ref())
+                    .ok_or_else(|| {
+                        format!(
+                            "Path {} references non-existent node {}",
+                            path.name,
+                            handle.node_id()
+                        )
+                    })?;
 
                 if handle.is_reverse() {
                     current_sequence.extend_from_slice(
@@ -610,7 +612,7 @@ impl BidirectedGraph {
                 // Show first few steps and last few steps
                 eprintln!("  First 10 steps:");
                 for (i, &handle) in path.steps.iter().enumerate().take(10) {
-                    if let Some(node) = self.nodes.get(&handle.node_id()) {
+                    if let Some(node) = self.nodes.get(handle.node_id()).and_then(|n| n.as_ref()) {
                         eprintln!(
                             "    Step {}: node {} ({} bp, {})",
                             i,
@@ -624,7 +626,7 @@ impl BidirectedGraph {
                 eprintln!("  Last 10 steps:");
                 let start = path.steps.len().saturating_sub(10);
                 for (i, &handle) in path.steps.iter().enumerate().skip(start) {
-                    if let Some(node) = self.nodes.get(&handle.node_id()) {
+                    if let Some(node) = self.nodes.get(handle.node_id()).and_then(|n| n.as_ref()) {
                         eprintln!(
                             "    Step {}: node {} ({} bp, {})",
                             i,

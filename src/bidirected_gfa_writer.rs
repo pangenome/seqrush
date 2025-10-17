@@ -126,7 +126,10 @@ impl SeqRush {
         // Write GFA directly from BidirectedGraph
         if verbose {
             eprintln!("[bidirected_gfa] Writing GFA to {}", output_path);
-            let mut sorted_ids: Vec<usize> = bi_graph.nodes.keys().cloned().collect();
+            let mut sorted_ids: Vec<usize> = bi_graph.nodes.iter()
+                .enumerate()
+                .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+                .collect();
             sorted_ids.sort();
             eprintln!("[bidirected_gfa] Final node count: {}", bi_graph.nodes.len());
             if !sorted_ids.is_empty() {

@@ -145,7 +145,8 @@ impl SeqRush {
                 let (node_id, node_base) = match union_to_node.get(&union_rep) {
                     Some(&id) => {
                         // Node already exists, get its base
-                        let node_base = graph.nodes.get(&id)
+                        let node_base = graph.nodes.get(id)
+                            .and_then(|n| n.as_ref())
                             .map(|n| n.sequence[0])
                             .unwrap_or(seq.data[i]);
                         (id, node_base)
@@ -252,11 +253,17 @@ impl SeqRush {
         }
         
         if verbose {
-            eprintln!("[bidirected_builder] Graph built with {} nodes", graph.nodes.len());
-            let first_10: Vec<usize> = graph.nodes.keys().take(10).cloned().collect();
+            eprintln!("[bidirected_builder] Graph built with {} nodes", graph.node_count());
+            let first_10: Vec<usize> = graph.nodes.iter()
+                .enumerate()
+                .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+                .take(10)
+                .collect();
             eprintln!("[bidirected_builder] First 10 node IDs: {:?}", first_10);
-            eprintln!("[bidirected_builder] Does graph have node 1? {}", graph.nodes.contains_key(&1));
-            eprintln!("[bidirected_builder] Does graph have node 2? {}", graph.nodes.contains_key(&2));
+            eprintln!("[bidirected_builder] Does graph have node 1? {}",
+                1 < graph.nodes.len() && graph.nodes[1].is_some());
+            eprintln!("[bidirected_builder] Does graph have node 2? {}",
+                2 < graph.nodes.len() && graph.nodes[2].is_some());
         }
 
         // Verify all path edges exist before sorting
@@ -286,15 +293,17 @@ impl SeqRush {
         let mut graph = Graph::new();
 
         // Convert nodes
-        for (id, bi_node) in bi_graph.nodes {
-            graph.nodes.insert(
-                id,
-                Node {
+        for (id, node_opt) in bi_graph.nodes.iter().enumerate() {
+            if let Some(bi_node) = node_opt {
+                graph.nodes.insert(
                     id,
-                    sequence: bi_node.sequence,
-                    rank: bi_node.rank.unwrap_or(id as u64) as f64,
-                },
-            );
+                    Node {
+                        id,
+                        sequence: bi_node.sequence.clone(),
+                        rank: bi_node.rank.unwrap_or(id as u64) as f64,
+                    },
+                );
+            }
         }
 
         // Convert edges (lose orientation information)
