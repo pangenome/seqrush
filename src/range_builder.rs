@@ -122,7 +122,11 @@ impl RangeBasedGraphBuilder {
                 sequence: node_seq,
                 rank: Some(node_id as u64),
             };
-            graph.nodes.insert(node_id, bi_node);
+            // Ensure the vec is large enough
+            if node_id >= graph.nodes.len() {
+                graph.nodes.resize(node_id + 1, None);
+            }
+            graph.nodes[node_id] = Some(bi_node);
 
             // Map positions to this node
             for pos in start..end {
@@ -130,13 +134,15 @@ impl RangeBasedGraphBuilder {
             }
 
             if verbose && node_id <= 5 {
-                eprintln!(
-                    "Created node {} spanning positions {}..{} with sequence '{}'",
-                    node_id,
-                    start,
-                    end,
-                    String::from_utf8_lossy(&graph.nodes[&node_id].sequence)
-                );
+                if let Some(Some(node)) = graph.nodes.get(node_id) {
+                    eprintln!(
+                        "Created node {} spanning positions {}..{} with sequence '{}'",
+                        node_id,
+                        start,
+                        end,
+                        String::from_utf8_lossy(&node.sequence)
+                    );
+                }
             }
 
             node_id += 1;

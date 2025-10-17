@@ -400,7 +400,12 @@ impl SeqwishStyleBuilder {
                 sequence: vec![base],
                 rank: Some(0),
             };
-            graph.nodes.insert(node_id as usize, node);
+            let id = node_id as usize;
+            // Ensure the vec is large enough
+            if id >= graph.nodes.len() {
+                graph.nodes.resize(id + 1, None);
+            }
+            graph.nodes[id] = Some(node);
 
             let handle = Handle::new(node_id as usize, false);
 

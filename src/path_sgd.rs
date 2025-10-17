@@ -56,7 +56,7 @@ impl PathIndex {
                 step_to_rank.push(rank);
 
                 // Add node length to position
-                if let Some(node) = graph.nodes.get(&handle.node_id()) {
+                if let Some(node) = graph.nodes.get(handle.node_id()).and_then(|n| n.as_ref()) {
                     position += node.sequence.len();
                 }
             }
@@ -231,14 +231,16 @@ pub fn path_linear_sgd(
         .collect();
 
     // Seed positions with graph layout
-    // IMPORTANT: Sort nodes by ID to ensure deterministic ordering!
-    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    // IMPORTANT: Sort nodes by ID to ensure deterministic ordering
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().enumerate()
+        .filter_map(|(id, n)| n.as_ref().map(|node| (id, node)))
+        .collect();
     sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
 
     let mut len = 0u64;
     let mut handle_to_idx: HashMap<Handle, usize> = HashMap::new();
     let mut idx = 0;
-    for (&node_id, node) in sorted_nodes {
+    for (node_id, node) in sorted_nodes {
         let handle = Handle::forward(node_id);
         handle_to_idx.insert(handle, idx);
         x[idx].store(f64_to_u64(len as f64), Ordering::Relaxed);
@@ -583,7 +585,9 @@ pub fn path_sgd_sort(graph: &BidirectedGraph, params: PathSGDParams) -> Vec<Hand
 
     // Create mapping from index to handle
     // IMPORTANT: Sort nodes by ID to ensure deterministic ordering!
-    let mut sorted_node_ids: Vec<_> = graph.nodes.keys().copied().collect();
+    let mut sorted_node_ids: Vec<_> = graph.nodes.iter().enumerate()
+        .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+        .collect();
     sorted_node_ids.sort();
 
     let mut idx_to_handle: HashMap<usize, Handle> = HashMap::new();

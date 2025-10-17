@@ -101,9 +101,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get node positions from node IDs (assuming sequential ordering represents layout)
     let mut node_positions: HashMap<usize, f64> = HashMap::new();
     let mut pos = 0.0;
-    for (&node_id, node) in graph.nodes.iter() {
-        node_positions.insert(node_id, pos);
-        pos += node.sequence.len() as f64;
+    for (node_id, node_opt) in graph.nodes.iter().enumerate() {
+        if let Some(node) = node_opt {
+            node_positions.insert(node_id, pos);
+            pos += node.sequence.len() as f64;
+        }
     }
 
     let total_length = pos;
@@ -138,7 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Get genomic distance (sum of node lengths between them in the path)
             // For consecutive nodes, this is just the length of node A
-            let genomic_distance = if let Some(node_a) = graph.nodes.get(&node_a_id) {
+            let genomic_distance = if let Some(Some(node_a)) = graph.nodes.get(node_a_id) {
                 node_a.sequence.len() as f64
             } else {
                 continue;

@@ -122,13 +122,15 @@ fn main() {
     }
 
     // Build sorted node list for SGD positioning
-    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().enumerate()
+        .filter_map(|(id, n)| n.as_ref().map(|node| (id, node)))
+        .collect();
     sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
 
     let mut node_id_to_sgd_pos: HashMap<usize, f64> = HashMap::new();
     let mut pos = 0.0;
-    for (&node_id, node) in &sorted_nodes {
-        node_id_to_sgd_pos.insert(node_id, pos);
+    for (node_id, node) in &sorted_nodes {
+        node_id_to_sgd_pos.insert(*node_id, pos);
         pos += node.sequence.len() as f64;
     }
 
@@ -143,7 +145,7 @@ fn main() {
         let mut cumulative_pos = 0;
         for handle in &path.steps {
             step_positions.push(cumulative_pos);
-            if let Some(node) = graph.nodes.get(&handle.node_id()) {
+            if let Some(Some(node)) = graph.nodes.get(handle.node_id()) {
                 cumulative_pos += node.sequence.len();
             }
         }

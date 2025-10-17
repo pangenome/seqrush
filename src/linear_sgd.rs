@@ -398,7 +398,10 @@ impl LinearSGD {
             let mut initial_pos = 0.0;
             let mut found = false;
             let mut cumulative = 0.0;
-            let mut sorted_ids: Vec<_> = self.graph.nodes.keys().cloned().collect();
+            let mut sorted_ids: Vec<_> = self.graph.nodes.iter()
+                .enumerate()
+                .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+                .collect();
             sorted_ids.sort();
             for id in sorted_ids {
                 if id == *node_id {
@@ -431,7 +434,10 @@ impl LinearSGD {
         let mut current_pos = 0.0;
 
         // Get nodes in sorted order (matching ODGI's approach)
-        let mut node_ids: Vec<usize> = self.graph.nodes.keys().cloned().collect();
+        let mut node_ids: Vec<usize> = self.graph.nodes.iter()
+            .enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .collect();
         node_ids.sort();
 
         for node_id in node_ids {

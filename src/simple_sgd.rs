@@ -198,7 +198,10 @@ impl SimpleSGD {
         let mut positions = HashMap::new();
         let mut current_pos = 0.0;
 
-        let mut node_ids: Vec<_> = self.graph.nodes.keys().cloned().collect();
+        let mut node_ids: Vec<_> = self.graph.nodes.iter()
+            .enumerate()
+            .filter_map(|(id, n)| if n.is_some() { Some(id) } else { None })
+            .collect();
         node_ids.sort();
 
         for node_id in node_ids {

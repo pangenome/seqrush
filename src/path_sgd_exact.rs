@@ -43,7 +43,7 @@ impl XPIndex {
             for &handle in &path.steps {
                 path_steps.push((path_id, handle));
                 let node_id = handle.node_id();
-                if let Some(node) = graph.nodes.get(&node_id) {
+                if let Some(Some(node)) = graph.nodes.get(node_id) {
                     path_len += node.sequence.len();
                 }
                 step_count += 1;
@@ -83,7 +83,7 @@ impl XPIndex {
                     return pos;
                 }
                 let node_id = handle.node_id();
-                if let Some(node) = graph.nodes.get(&node_id) {
+                if let Some(Some(node)) = graph.nodes.get(node_id) {
                     pos += node.sequence.len();
                 }
                 current_rank += 1;
@@ -257,14 +257,16 @@ pub fn path_linear_sgd(
 
     // Line 63-69: Seed positions with graph order
     // CRITICAL: Sort nodes by ID to ensure deterministic ordering (HashMap iter order is non-deterministic!)
-    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().enumerate()
+        .filter_map(|(id, n)| n.as_ref().map(|node| (id, node)))
+        .collect();
     sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
 
     let mut len = 0.0;
     let mut node_id_to_index: HashMap<usize, usize> = HashMap::new();
-    for (idx, (&node_id, node)) in sorted_nodes.iter().enumerate() {
+    for (idx, (node_id, node)) in sorted_nodes.iter().enumerate() {
         x_positions[idx].store(len);
-        node_id_to_index.insert(node_id, idx);
+        node_id_to_index.insert(*node_id, idx);
         len += node.sequence.len() as f64;
     }
 
@@ -534,7 +536,7 @@ pub fn path_linear_sgd(
                                 if current_rank == s_rank {
                                     break;
                                 }
-                                if let Some(node) = graph_clone.nodes.get(&h.node_id()) {
+                                if let Some(Some(node)) = graph_clone.nodes.get(h.node_id()) {
                                     pos += node.sequence.len();
                                 }
                                 current_rank += 1;
@@ -550,7 +552,7 @@ pub fn path_linear_sgd(
                                 if *h == handle_b {
                                     break;
                                 }
-                                if let Some(node) = graph_clone.nodes.get(&h.node_id()) {
+                                if let Some(Some(node)) = graph_clone.nodes.get(h.node_id()) {
                                     pos += node.sequence.len();
                                 }
                             }
@@ -661,12 +663,14 @@ pub fn path_sgd_sort(graph: &BidirectedGraph, params: PathSGDParams) -> Vec<Hand
 
     // Sort handles by position
     // CRITICAL: Must use SAME sorted order as path_linear_sgd when building node_id_to_index mapping!
-    let mut sorted_nodes: Vec<_> = graph.nodes.iter().collect();
+    let mut sorted_nodes: Vec<_> = graph.nodes.iter().enumerate()
+        .filter_map(|(id, n)| n.as_ref().map(|node| (id, node)))
+        .collect();
     sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
 
     let mut handle_positions: Vec<(Handle, f64)> = Vec::new();
-    for (idx, (&node_id, _node)) in sorted_nodes.iter().enumerate() {
-        let handle = Handle::new(node_id, false);
+    for (idx, (node_id, _node)) in sorted_nodes.iter().enumerate() {
+        let handle = Handle::new(*node_id, false);
         handle_positions.push((handle, positions[idx]));
     }
 

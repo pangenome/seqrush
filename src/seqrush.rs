@@ -96,8 +96,8 @@ pub struct Args {
     #[arg(long = "skip-topo", default_value = "false")]
     pub skip_topo: bool,
 
-    /// Number of SGD iterations (default: 30, matching ODGI)
-    #[arg(long = "sgd-iter-max", default_value = "30")]
+    /// Number of SGD iterations (default: 100, matching ODGI)
+    #[arg(long = "sgd-iter-max", default_value = "100")]
     pub sgd_iter_max: u64,
 
     /// SGD learning rate parameter eta_max (default: calculated from graph)
@@ -1277,7 +1277,7 @@ impl SeqRush {
         let mut hashes = HashMap::new();
 
         for path in &graph.paths {
-            let sequence = path.get_sequence(|id| graph.nodes.get(&id));
+            let sequence = path.get_sequence(|id| graph.nodes.get(id).and_then(|n| n.as_ref()));
             let mut hasher = Sha256::new();
             hasher.update(&sequence);
             let hash = hasher.finalize().to_vec();
@@ -1288,7 +1288,7 @@ impl SeqRush {
     }
 
     fn compute_graph_size(&self, graph: &BidirectedGraph) -> usize {
-        graph.nodes.values().map(|node| node.sequence.len()).sum()
+        graph.nodes.iter().filter_map(|n| n.as_ref()).map(|node| node.sequence.len()).sum()
     }
 
     pub fn validate_paths_match_sequences(
@@ -1304,7 +1304,7 @@ impl SeqRush {
                 .ok_or_else(|| format!("Path '{}' not found in graph", seq.id))?;
 
             // Extract sequence from path
-            let path_sequence = path.get_sequence(|id| graph.nodes.get(&id));
+            let path_sequence = path.get_sequence(|id| graph.nodes.get(id).and_then(|n| n.as_ref()));
 
             // Compare with original
             if path_sequence != seq.data {

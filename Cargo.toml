@@ -65,6 +65,11 @@ name = "sgd_diagnostics"
 path = "src/bin/sgd_diagnostics.rs"
 test = false
 
+[[bin]]
+name = "sort_gfa"
+path = "src/bin/sort_gfa.rs"
+test = false
+
 [features]
 debug-bins = []
 default = ["use-allwave"]

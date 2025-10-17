@@ -9,9 +9,11 @@ pub fn convert_to_embedded(bi_graph: &BidirectedGraph) -> Result<EmbeddedGraph, 
 
     // First, add all nodes
     let mut node_mapping = HashMap::new();
-    for (old_id, node) in &bi_graph.nodes {
-        let new_id = embedded.add_node(node.sequence.clone());
-        node_mapping.insert(*old_id, new_id);
+    for (old_id, node_opt) in bi_graph.nodes.iter().enumerate() {
+        if let Some(node) = node_opt {
+            let new_id = embedded.add_node(node.sequence.clone());
+            node_mapping.insert(old_id, new_id);
+        }
     }
 
     // Then, add all paths
