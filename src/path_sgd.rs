@@ -599,8 +599,8 @@ pub fn path_sgd_sort(graph: &BidirectedGraph, params: PathSGDParams) -> Vec<Hand
     let mut node_positions: Vec<(usize, f64)> = positions.into_iter().collect();
     node_positions.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-    // Map back to handles
+    // Map back to handles (filter out indices without valid handles)
     node_positions.into_iter()
-        .map(|(idx, _)| idx_to_handle.get(&idx).copied().unwrap_or(Handle::forward(0)))
+        .filter_map(|(idx, _)| idx_to_handle.get(&idx).copied())
         .collect()
 }
