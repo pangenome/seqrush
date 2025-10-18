@@ -140,6 +140,7 @@ fn test_self_loops_in_gfa() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_seqrush(args).unwrap();
@@ -213,6 +214,7 @@ fn test_complex_graph_produces_valid_gfa() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_seqrush(args).unwrap();

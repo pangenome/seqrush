@@ -181,6 +181,7 @@ fn test_complex_cnv_repeats() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -247,6 +248,7 @@ fn test_y_shaped_breakpoint() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -307,6 +309,7 @@ fn test_nested_inversions() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -378,6 +381,7 @@ fn test_random_rearrangements() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -450,6 +454,7 @@ fn test_tandem_repeat_polymorphism() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -517,6 +522,7 @@ fn test_complex_nested_variations() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -588,6 +594,7 @@ fn test_interspersed_repeats_with_inversions() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -666,6 +673,7 @@ fn test_breakpoint_resolution() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
