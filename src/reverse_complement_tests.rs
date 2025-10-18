@@ -77,6 +77,7 @@ mod reverse_complement_tests {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+            frequency: None,
         };
 
         // Build the graph
@@ -148,6 +149,7 @@ mod reverse_complement_tests {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+            frequency: None,
         };
 
         run_seqrush(args).unwrap();
@@ -229,6 +231,7 @@ mod reverse_complement_tests {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+            frequency: None,
         };
 
         run_seqrush(args).unwrap();
@@ -364,6 +367,7 @@ mod reverse_complement_tests {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+            frequency: None,
         };
 
         run_seqrush(args).unwrap();
