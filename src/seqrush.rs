@@ -335,6 +335,23 @@ impl SeqRush {
         }
     }
 
+    /// Count the number of distinct union-find components
+    /// Since forward/reverse orientations of each position are united in the constructor,
+    /// we only need to check forward orientations to count base-level components
+    fn count_components(&self) -> usize {
+        use std::collections::HashSet;
+        let mut representatives = HashSet::new();
+
+        // Iterate through all base positions (forward orientation)
+        for i in 0..self.total_length {
+            let pos = make_pos(i, false);
+            let rep = self.union_find.find(pos);
+            representatives.insert(rep);
+        }
+
+        representatives.len()
+    }
+
     pub fn build_graph(&mut self, args: &Args) {
         println!(
             "Building graph with {} sequences (total length: {})",
@@ -344,10 +361,16 @@ impl SeqRush {
 
         // Phase 1: Align all pairs and update union-find
         if args.iterative {
-            eprintln!("ERROR: Iterative alignment mode is not yet implemented in seqrush.rs");
-            eprintln!("       This feature is available in seqrush_clean.rs but needs to be ported.");
-            eprintln!("       For now, run without --iterative flag.");
-            std::process::exit(1);
+            #[cfg(feature = "use-allwave")]
+            {
+                self.align_and_unite_iterative(args);
+            }
+            #[cfg(not(feature = "use-allwave"))]
+            {
+                eprintln!("ERROR: Iterative alignment mode requires the 'use-allwave' feature");
+                eprintln!("       Please rebuild with: cargo build --release --features use-allwave");
+                std::process::exit(1);
+            }
         } else {
             self.align_and_unite(args);
         }
@@ -770,6 +793,187 @@ impl SeqRush {
 
         // Now process the filtered PAF using existing align_and_unite_from_paf
         self.align_and_unite_from_paf(temp_filtered.path().to_str().unwrap(), args);
+    }
+
+    #[cfg(feature = "use-allwave")]
+    pub fn align_and_unite_iterative(&self, args: &Args) {
+        println!("Using iterative alignment with stabilization detection");
+
+        // Parse alignment scores
+        let scores = match AlignmentScores::parse(&args.scores) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error parsing scores: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let orientation_scores = match AlignmentScores::parse_orientation(&args.orientation_scores) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error parsing orientation scores: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        // Convert sequences to allwave format
+        let allwave_sequences: Vec<allwave::Sequence> = self
+            .sequences
+            .iter()
+            .map(|s| allwave::Sequence {
+                id: s.id.clone(),
+                seq: s.data.clone(),
+            })
+            .collect();
+
+        // Create alignment parameters
+        let params = AlignmentParams {
+            match_score: scores.match_score,
+            mismatch_penalty: scores.mismatch_penalty,
+            gap_open: scores.gap1_open,
+            gap_extend: scores.gap1_extend,
+            gap2_open: scores.gap2_open,
+            gap2_extend: scores.gap2_extend,
+            max_divergence: args.max_divergence,
+        };
+
+        let orientation_params = AlignmentParams {
+            match_score: orientation_scores.match_score,
+            mismatch_penalty: orientation_scores.mismatch_penalty,
+            gap_open: orientation_scores.gap1_open,
+            gap_extend: orientation_scores.gap1_extend,
+            gap2_open: orientation_scores.gap2_open,
+            gap2_extend: orientation_scores.gap2_extend,
+            max_divergence: None,
+        };
+
+        // Get prioritized pair list from AllWave using TreeSampling
+        // k=3 for k-nearest neighbors and k-farthest
+        let pairs = AllPairIterator::with_options(
+            &allwave_sequences,
+            params.clone(),
+            false, // include self-alignments
+            false, // don't use mash orientation
+            SparsificationStrategy::TreeSampling(3, 3, 0.1, Some(16)),
+        )
+        .get_pairs();
+
+        println!("Processing {} prioritized pairs", pairs.len());
+
+        // Create PAF writer if requested
+        let paf_writer = if let Some(paf_path) = &args.output_alignments {
+            match File::create(paf_path) {
+                Ok(file) => {
+                    println!("Writing alignments to {}", paf_path);
+                    Some(Arc::new(Mutex::new(BufWriter::new(file))))
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to create PAF file {}: {}", paf_path, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Track stabilization
+        let mut prev_component_count = self.total_length; // Initially all positions are separate
+        let mut stable_count = 0;
+        const STABILITY_THRESHOLD: usize = 10; // Stop if no change after N checks
+        const CHECK_INTERVAL: usize = 10; // Check every N pairs
+
+        // Process pairs iteratively
+        for (pair_idx, (i, j)) in pairs.iter().enumerate() {
+            // Create aligner for this specific pair
+            let pair_sequences = vec![allwave_sequences[*i].clone(), allwave_sequences[*j].clone()];
+
+            let aligner = AllPairIterator::with_options(
+                &pair_sequences,
+                params.clone(),
+                false, // include self-alignments within the pair
+                false, // don't use mash orientation
+                SparsificationStrategy::None,
+            )
+            .with_orientation_params(orientation_params.clone());
+
+            // Align this pair
+            for alignment in aligner {
+                // Write to PAF if requested
+                if let Some(writer) = &paf_writer {
+                    let paf_record = allwave::alignment_to_paf(&alignment, &pair_sequences);
+                    if let Ok(mut w) = writer.lock() {
+                        let _ = writeln!(w, "{}", paf_record);
+                    }
+                }
+
+                // Get the actual sequence indices (i and j from the pairs list)
+                // Map from pair_sequences indices (0 or 1) to original sequence indices
+                let query_idx = if alignment.query_idx == 0 { *i } else { *j };
+                let target_idx = if alignment.target_idx == 0 { *i } else { *j };
+
+                let query_seq = &self.sequences[query_idx];
+                let target_seq = &self.sequences[target_idx];
+
+                // Process alignment
+                let cigar = allwave::cigar_bytes_to_string(&alignment.cigar_bytes);
+                self.process_alignment(
+                    &cigar,
+                    query_seq,
+                    target_seq,
+                    args.min_match_length,
+                    alignment.is_reverse,
+                    0,
+                    query_seq.data.len(),
+                    0,
+                    target_seq.data.len(),
+                    args.verbose,
+                );
+            }
+
+            // Check for stabilization every CHECK_INTERVAL pairs
+            if (pair_idx + 1) % CHECK_INTERVAL == 0 {
+                let component_count = self.count_components();
+
+                if args.verbose {
+                    println!(
+                        "After {} pairs: {} components (prev: {})",
+                        pair_idx + 1,
+                        component_count,
+                        prev_component_count
+                    );
+                }
+
+                if component_count == prev_component_count {
+                    stable_count += 1;
+                    if stable_count >= STABILITY_THRESHOLD {
+                        println!(
+                            "Graph stabilized after {} pairs ({} components)",
+                            pair_idx + 1,
+                            component_count
+                        );
+                        println!(
+                            "Skipped {} pairs ({}% reduction)",
+                            pairs.len() - (pair_idx + 1),
+                            ((pairs.len() - (pair_idx + 1)) as f64 / pairs.len() as f64 * 100.0)
+                        );
+                        break;
+                    }
+                } else {
+                    stable_count = 0; // Reset if we saw a change
+                }
+
+                prev_component_count = component_count;
+            }
+        }
+
+        // Flush PAF writer
+        if let Some(writer) = &paf_writer {
+            if let Ok(mut w) = writer.lock() {
+                let _ = w.flush();
+            }
+        }
+
+        println!("Final component count: {}", self.count_components());
     }
 
     fn process_alignment(
