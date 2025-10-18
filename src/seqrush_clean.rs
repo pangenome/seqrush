@@ -82,6 +82,17 @@ impl SeqRush {
         }
     }
 
+    /// Count the number of distinct union-find components
+    fn count_components(&self) -> usize {
+        use std::collections::HashSet;
+        let mut representatives = HashSet::new();
+        for i in 0..self.total_length {
+            let rep = self.union_find.find(i);
+            representatives.insert(rep);
+        }
+        representatives.len()
+    }
+
     pub fn build_graph(&mut self, args: &Args) {
         println!("Loaded {} sequences", self.sequences.len());
         println!(
@@ -194,6 +205,154 @@ impl SeqRush {
                 let _ = w.flush();
             }
         }
+    }
+
+    /// Iterative alignment with stabilization detection
+    /// Aligns pairs in priority order and stops when union-find stabilizes
+    pub fn align_and_unite_iterative(&self, args: &Args) {
+        println!("Using iterative alignment with stabilization detection");
+
+        // Convert sequences to alignment format
+        let aligner_sequences: Vec<AlignmentSequence> = self
+            .sequences
+            .iter()
+            .map(|s| AlignmentSequence {
+                id: s.id.clone(),
+                seq: s.data.clone(),
+            })
+            .collect();
+
+        // Get prioritized pair list from AllWave using TreeSampling
+        // Use k=3 for k-nearest neighbors and k-farthest
+        #[cfg(feature = "use-allwave")]
+        use allwave::SparsificationStrategy;
+
+        #[cfg(feature = "use-allwave")]
+        let pairs = crate::aligner::allwave_impl::AllwaveAligner::get_prioritized_pairs(
+            &aligner_sequences,
+            SparsificationStrategy::TreeSampling(3, 3, 0.1, Some(16)),
+            args.verbose,
+        ).expect("Failed to get prioritized pairs");
+
+        #[cfg(not(feature = "use-allwave"))]
+        let pairs: Vec<(usize, usize)> = {
+            eprintln!("AllWave feature not enabled, using all-vs-all pairs");
+            let n = aligner_sequences.len();
+            (0..n).flat_map(|i| (0..n).filter(move |&j| i != j).map(move |j| (i, j))).collect()
+        };
+
+        println!("Processing {} prioritized pairs", pairs.len());
+
+        // Create aligner for pairwise alignment
+        let backend = args.aligner.parse::<AlignerBackend>()
+            .unwrap_or(AlignerBackend::AllWave);
+
+        let aligner = crate::aligner::create_aligner(
+            backend,
+            args.threads,
+            args.verbose,
+            None,
+        ).expect("Failed to create aligner");
+
+        // Create PAF writer if requested
+        let paf_writer = if let Some(paf_path) = &args.output_alignments {
+            match File::create(paf_path) {
+                Ok(file) => {
+                    println!("Writing alignments to {}", paf_path);
+                    Some(Arc::new(Mutex::new(BufWriter::new(file))))
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to create PAF file {}: {}", paf_path, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Track stabilization
+        let mut prev_component_count = self.total_length; // Initially all positions are separate
+        let mut stable_count = 0;
+        const STABILITY_THRESHOLD: usize = 10; // Stop if no change after N alignments
+
+        // Process pairs iteratively
+        for (pair_idx, (i, j)) in pairs.iter().enumerate() {
+            // Align this specific pair
+            let pair_seqs = vec![aligner_sequences[*i].clone(), aligner_sequences[*j].clone()];
+
+            let alignments = aligner.align_sequences(&pair_seqs)
+                .expect("Pairwise alignment failed");
+
+            // Process alignments from this pair
+            for alignment in &alignments {
+                // Write to PAF if requested
+                if let Some(writer) = &paf_writer {
+                    let paf_line = format!(
+                        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t*\t*\tcg:Z:{}",
+                        alignment.query_name,
+                        alignment.query_len,
+                        alignment.query_start,
+                        alignment.query_end,
+                        alignment.strand,
+                        alignment.target_name,
+                        alignment.target_len,
+                        alignment.target_start,
+                        alignment.target_end,
+                        alignment.cigar
+                    );
+                    if let Ok(mut w) = writer.lock() {
+                        let _ = writeln!(w, "{}", paf_line);
+                    }
+                }
+
+                // Find sequence indices in original sequences
+                let query_idx = self.sequences.iter().position(|s| s.id == alignment.query_name)
+                    .expect(&format!("Query sequence not found: {}", alignment.query_name));
+                let target_idx = self.sequences.iter().position(|s| s.id == alignment.target_name)
+                    .expect(&format!("Target sequence not found: {}", alignment.target_name));
+
+                // Process alignment for union-find
+                self.process_alignment(
+                    &alignment.cigar,
+                    &self.sequences[query_idx],
+                    &self.sequences[target_idx],
+                    args.min_match_length,
+                    alignment.strand == '-',
+                );
+            }
+
+            // Check for stabilization every 10 pairs
+            if (pair_idx + 1) % 10 == 0 {
+                let component_count = self.count_components();
+
+                if args.verbose {
+                    println!("After {} pairs: {} components (prev: {})",
+                             pair_idx + 1, component_count, prev_component_count);
+                }
+
+                if component_count == prev_component_count {
+                    stable_count += 1;
+                    if stable_count >= STABILITY_THRESHOLD {
+                        println!("Graph stabilized after {} pairs ({} components)",
+                                 pair_idx + 1, component_count);
+                        break;
+                    }
+                } else {
+                    stable_count = 0; // Reset if we saw a change
+                }
+
+                prev_component_count = component_count;
+            }
+        }
+
+        // Flush PAF writer
+        if let Some(writer) = &paf_writer {
+            if let Ok(mut w) = writer.lock() {
+                let _ = w.flush();
+            }
+        }
+
+        println!("Final component count: {}", self.count_components());
     }
 
     fn process_alignment(
