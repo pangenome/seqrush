@@ -32,22 +32,66 @@ pub trait Aligner {
     ) -> Result<Vec<AlignmentRecord>, Box<dyn Error>>;
 }
 
-/// Factory function to create the appropriate aligner based on compile-time features
+/// Enum to select which aligner to use at runtime
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlignerBackend {
+    AllWave,
+    SweepGA,
+}
+
+impl std::str::FromStr for AlignerBackend {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "allwave" => Ok(AlignerBackend::AllWave),
+            "sweepga" => Ok(AlignerBackend::SweepGA),
+            _ => Err(format!("Unknown aligner: {}", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for AlignerBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlignerBackend::AllWave => write!(f, "allwave"),
+            AlignerBackend::SweepGA => write!(f, "sweepga"),
+        }
+    }
+}
+
+/// Factory function to create the appropriate aligner based on runtime selection
 pub fn create_aligner(
+    backend: AlignerBackend,
     threads: usize,
     verbose: bool,
     #[allow(unused_variables)] frequency: Option<usize>,
 ) -> Result<Box<dyn Aligner>, Box<dyn Error>> {
-    #[cfg(feature = "use-allwave")]
-    {
-        Ok(Box::new(allwave_impl::AllwaveAligner::new(
-            threads, verbose,
-        )?))
-    }
-
-    #[cfg(not(feature = "use-allwave"))]
-    {
-        Err("No aligner feature enabled. Enable 'use-allwave'".into())
+    match backend {
+        AlignerBackend::AllWave => {
+            #[cfg(feature = "use-allwave")]
+            {
+                Ok(Box::new(allwave_impl::AllwaveAligner::new(
+                    threads, verbose,
+                )?))
+            }
+            #[cfg(not(feature = "use-allwave"))]
+            {
+                Err("AllWave aligner not available. Rebuild with --features use-allwave".into())
+            }
+        }
+        AlignerBackend::SweepGA => {
+            #[cfg(feature = "use-sweepga")]
+            {
+                Ok(Box::new(sweepga_impl::SweepgaAligner::new(
+                    frequency, threads, verbose,
+                )?))
+            }
+            #[cfg(not(feature = "use-sweepga"))]
+            {
+                Err("SweepGA aligner not available. Rebuild with --features use-sweepga".into())
+            }
+        }
     }
 }
 
@@ -55,6 +99,5 @@ pub fn create_aligner(
 #[cfg(feature = "use-allwave")]
 pub mod allwave_impl;
 
-// Sweepga support temporarily disabled for CI
-// #[cfg(feature = "use-sweepga")]
-// pub mod sweepga_impl;
+#[cfg(feature = "use-sweepga")]
+pub mod sweepga_impl;

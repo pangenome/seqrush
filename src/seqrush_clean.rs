@@ -1,5 +1,5 @@
+use crate::aligner::{AlignerBackend, AlignmentSequence};
 use crate::graph_ops::{Edge, Graph, Node};
-use allwave::{AlignmentParams, AllPairIterator, SparsificationStrategy};
 use clap::Parser;
 use std::collections::HashMap;
 use std::fs::File;
@@ -7,6 +7,8 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::Arc;
 use std::sync::Mutex;
 use uf_rush::UFRush;
+
+// AllWave is now used via the aligner abstraction
 
 #[derive(Parser)]
 #[command(
@@ -50,6 +52,10 @@ pub struct Args {
     /// Output alignments to PAF file
     #[arg(long = "output-alignments")]
     pub output_alignments: Option<String>,
+
+    /// Aligner backend to use (allwave or sweepga)
+    #[arg(short = 'A', long, default_value = "allwave")]
+    pub aligner: String,
 }
 
 #[derive(Clone, Debug)]
@@ -92,19 +98,38 @@ impl SeqRush {
     }
 
     pub fn align_and_unite(&self, args: &Args) {
-        // Parse alignment parameters
-        let params = parse_alignment_params(&args.scores, args.max_divergence);
-        let orientation_params = parse_alignment_params(&args.orientation_scores, None);
+        // Parse aligner backend
+        let backend = args.aligner.parse::<AlignerBackend>()
+            .unwrap_or_else(|e| {
+                eprintln!("Error parsing aligner: {}. Using allwave.", e);
+                AlignerBackend::AllWave
+            });
 
-        // Convert sequences to allwave format
-        let allwave_sequences: Vec<allwave::Sequence> = self
+        println!("Using aligner: {}", backend);
+
+        // Convert sequences to alignment format
+        let aligner_sequences: Vec<AlignmentSequence> = self
             .sequences
             .iter()
-            .map(|s| allwave::Sequence {
+            .map(|s| AlignmentSequence {
                 id: s.id.clone(),
                 seq: s.data.clone(),
             })
             .collect();
+
+        // Create aligner
+        let aligner = crate::aligner::create_aligner(
+            backend,
+            args.threads,
+            args.verbose,
+            None, // frequency (for SweepGA)
+        ).expect("Failed to create aligner");
+
+        // Run alignment
+        let alignments = aligner.align_sequences(&aligner_sequences)
+            .expect("Alignment failed");
+
+        println!("Generated {} alignments", alignments.len());
 
         // Create PAF writer if requested
         let paf_writer = if let Some(paf_path) = &args.output_alignments {
@@ -122,41 +147,41 @@ impl SeqRush {
             None
         };
 
-        // Create aligner excluding self-alignments
-        let aligner = AllPairIterator::with_options(
-            &allwave_sequences,
-            params,
-            true,  // exclude self
-            false, // use_mash_orientation
-            SparsificationStrategy::None,
-        )
-        .with_orientation_params(orientation_params);
-
-        let n = self.sequences.len();
-        println!(
-            "Total sequence pairs: {} (sparsification: None)",
-            n * (n - 1)
-        );
-
-        // Process alignments sequentially for debugging
-        let alignments: Vec<_> = aligner.collect();
-        for alignment in alignments {
+        // Process alignments
+        for alignment in &alignments {
             // Write to PAF if requested
             if let Some(writer) = &paf_writer {
-                let paf_record = allwave::alignment_to_paf(&alignment, &allwave_sequences);
+                let paf_line = format!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t*\t*\tcg:Z:{}",
+                    alignment.query_name,
+                    alignment.query_len,
+                    alignment.query_start,
+                    alignment.query_end,
+                    alignment.strand,
+                    alignment.target_name,
+                    alignment.target_len,
+                    alignment.target_start,
+                    alignment.target_end,
+                    alignment.cigar
+                );
                 if let Ok(mut w) = writer.lock() {
-                    let _ = writeln!(w, "{}", paf_record);
+                    let _ = writeln!(w, "{}", paf_line);
                 }
             }
 
+            // Find sequence indices
+            let query_idx = self.sequences.iter().position(|s| s.id == alignment.query_name)
+                .expect(&format!("Query sequence not found: {}", alignment.query_name));
+            let target_idx = self.sequences.iter().position(|s| s.id == alignment.target_name)
+                .expect(&format!("Target sequence not found: {}", alignment.target_name));
+
             // Process alignment for union-find
-            let cigar = allwave::cigar_bytes_to_string(&alignment.cigar_bytes);
             self.process_alignment(
-                &cigar,
-                &self.sequences[alignment.query_idx],
-                &self.sequences[alignment.target_idx],
+                &alignment.cigar,
+                &self.sequences[query_idx],
+                &self.sequences[target_idx],
                 args.min_match_length,
-                alignment.is_reverse,
+                alignment.strand == '-',
             );
         }
 
@@ -484,22 +509,7 @@ impl SeqRush {
     }
 }
 
-fn parse_alignment_params(scores_str: &str, max_divergence: Option<f64>) -> AlignmentParams {
-    let parts: Vec<i32> = scores_str
-        .split(',')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-
-    AlignmentParams {
-        match_score: parts.get(0).copied().unwrap_or(0),
-        mismatch_penalty: parts.get(1).copied().unwrap_or(5),
-        gap_open: parts.get(2).copied().unwrap_or(8),
-        gap_extend: parts.get(3).copied().unwrap_or(2),
-        gap2_open: parts.get(4).copied(),
-        gap2_extend: parts.get(5).copied(),
-        max_divergence,
-    }
-}
+// parse_alignment_params removed - alignment parameters are now handled by individual aligners
 
 fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()

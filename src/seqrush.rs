@@ -136,9 +136,13 @@ pub struct Args {
     #[arg(long = "groom", default_value = "false", hide = true)]
     pub groom: bool,
 
-    /// Aligner to use: 'allwave' (default: allwave)
+    /// Aligner to use: 'allwave', 'sweepga' (default: allwave)
     #[arg(long = "aligner", default_value = "allwave")]
     pub aligner: String,
+
+    /// K-mer frequency threshold for SweepGA (use k-mers occurring ≤ N times)
+    #[arg(long = "frequency", short = 'f')]
+    pub frequency: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -351,16 +355,15 @@ impl SeqRush {
                 #[cfg(feature = "use-allwave")]
                 "allwave" => self.align_and_unite_with_allwave(args),
 
-                // Sweepga temporarily disabled for CI
-                // #[cfg(feature = "use-sweepga")]
-                // "sweepga" => self.align_and_unite_with_sweepga(args),
+                #[cfg(feature = "use-sweepga")]
+                "sweepga" => self.align_and_unite_with_sweepga(args),
 
                 _ => {
                     eprintln!("Error: Unknown aligner '{}'. Available aligners:", args.aligner);
                     #[cfg(feature = "use-allwave")]
                     eprintln!("  - allwave");
-                    // #[cfg(feature = "use-sweepga")]
-                    // eprintln!("  - sweepga");
+                    #[cfg(feature = "use-sweepga")]
+                    eprintln!("  - sweepga");
                     std::process::exit(1);
                 }
             }
@@ -625,50 +628,31 @@ impl SeqRush {
         });
     }
 
-    /* Sweepga temporarily disabled for CI
     #[cfg(feature = "use-sweepga")]
     pub fn align_and_unite_with_sweepga(&self, args: &Args) {
-        use fastga_rs::{Config, FastGA};
         use std::path::Path;
+        use sweepga::fastga_integration::FastGAIntegration;
+        use sweepga::paf_filter::{FilterConfig, FilterMode, PafFilter, ScoringFunction};
         use tempfile::NamedTempFile;
 
         if args.verbose {
-            println!("Using sweepga aligner");
+            println!("Using SweepGA aligner (FastGA + plane sweep filtering)");
+            if let Some(freq) = args.frequency {
+                println!("K-mer frequency threshold: {}", freq);
+            }
         }
 
         // Get input FASTA path
         let fasta_path = Path::new(&args.sequences);
 
-        // Create FastGA instance
-        let mut config_builder = Config::builder()
-            .num_threads(args.threads)
-            .verbose(args.verbose);
-
-        let config = config_builder.build();
-        let fastga = match FastGA::new(config) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("Failed to create FastGA: {}", e);
-                std::process::exit(1);
-            }
-        };
-
-        // Run alignment directly on the input file
+        // Run FastGA alignment using modern sweepga API
         if args.verbose {
             println!("Running FastGA alignment on {}...", fasta_path.display());
         }
 
-        // Create temp PAF file
-        let paf_temp = match NamedTempFile::new() {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("Failed to create temp file: {}", e);
-                std::process::exit(1);
-            }
-        };
-
-        let num_alignments = match fastga.align_to_file(fasta_path, fasta_path, paf_temp.path()) {
-            Ok(n) => n,
+        let fastga = FastGAIntegration::new(args.frequency, args.threads);
+        let temp_paf = match fastga.align_to_temp_paf(fasta_path, fasta_path) {
+            Ok(paf) => paf,
             Err(e) => {
                 eprintln!("FastGA alignment failed: {}", e);
                 std::process::exit(1);
@@ -676,13 +660,67 @@ impl SeqRush {
         };
 
         if args.verbose {
-            println!("FastGA produced {} alignments", num_alignments);
+            // Count raw alignments
+            use std::fs;
+            let paf_content = fs::read_to_string(temp_paf.path()).expect("Failed to read PAF");
+            let line_count = paf_content.lines()
+                .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+                .count();
+            println!("FastGA produced {} raw alignments", line_count);
         }
 
-        // Now process the PAF using existing align_and_unite_from_paf
-        self.align_and_unite_from_paf(paf_temp.path().to_str().unwrap(), args);
+        // Apply 1:1 plane sweep filtering for clean graph construction
+        if args.verbose {
+            println!("Applying 1:1 plane sweep filtering...");
+        }
+
+        let filter_config = FilterConfig {
+            mapping_filter_mode: FilterMode::OneToOne,
+            mapping_max_per_query: Some(1),
+            mapping_max_per_target: Some(1),
+            scoring_function: ScoringFunction::LogLengthIdentity,
+            overlap_threshold: 0.95,
+            min_block_length: 100,  // Filter out very short alignments
+            scaffold_filter_mode: FilterMode::ManyToMany,  // No scaffolding
+            scaffold_max_per_query: None,
+            scaffold_max_per_target: None,
+            plane_sweep_secondaries: 0,
+            sparsity: 1.0,
+            no_merge: true,
+            chain_gap: 2000,
+            scaffold_gap: 10000,
+            min_scaffold_length: 0,
+            scaffold_overlap_threshold: 0.95,
+            scaffold_max_deviation: 0,
+            prefix_delimiter: '#',
+            skip_prefix: false,
+            min_identity: 0.0,
+            min_scaffold_identity: 0.0,
+        };
+
+        let temp_filtered = NamedTempFile::new().expect("Failed to create temp file");
+        let filter = PafFilter::new(filter_config);
+        if let Err(e) = filter.filter_paf(
+            temp_paf.path().to_str().unwrap(),
+            temp_filtered.path().to_str().unwrap()
+        ) {
+            eprintln!("PAF filtering failed: {}", e);
+            std::process::exit(1);
+        }
+
+        if args.verbose {
+            // Count filtered alignments
+            use std::fs;
+            let filtered_content = fs::read_to_string(temp_filtered.path()).expect("Failed to read filtered PAF");
+            let filtered_count = filtered_content.lines()
+                .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+                .count();
+            println!("After 1:1 filtering: {} alignments", filtered_count);
+        }
+
+        // Now process the filtered PAF using existing align_and_unite_from_paf
+        self.align_and_unite_from_paf(temp_filtered.path().to_str().unwrap(), args);
     }
-    */
 
     fn process_alignment(
         &self,

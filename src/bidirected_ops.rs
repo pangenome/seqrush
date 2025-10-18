@@ -1399,9 +1399,6 @@ impl BidirectedGraph {
             return sorted;
         }
 
-        // Build path position map for path-aware ordering
-        let path_positions = self.build_path_position_map();
-
         // S - set of oriented handles ready to be processed
         // Using BTreeSet for deterministic ordering (ODGI behavior)
         let mut s: BTreeSet<Handle> = BTreeSet::new();
@@ -1458,10 +1455,12 @@ impl BidirectedGraph {
                 // First try previously identified seeds (in path order)
                 let mut found_seed = false;
 
-                // Process seeds in order - they're already path-ordered
+                // Process seeds in NODE ID ORDER (not path order)
+                // ODGI uses node rank order to preserve the existing layout
+                // Sort seeds by node ID before processing
                 if !seeds.is_empty() {
-                    // Take the first seed from the Vec (earliest in paths)
-                    let handle = seeds.remove(0);
+                    seeds.sort_by_key(|h| (h.node_id(), h.is_reverse()));
+                    let handle = seeds.remove(0);  // Take lowest node ID
                     if unvisited.contains(&handle) {
                         s.insert(handle);
                         unvisited.remove(&handle);
@@ -1479,15 +1478,15 @@ impl BidirectedGraph {
                 }
                 
                 // If no seeds available, pick arbitrary unvisited handle
-                // Use path position to prioritize nodes that appear earlier in paths
+                // Use NODE ID order (not path order) to preserve SGD layout
+                // ODGI picks lowest node ID to maintain existing ordering
                 if !found_seed && !unvisited.is_empty() {
-                    // Get handle with earliest path position (or lowest ID as tiebreaker)
+                    // Get handle with lowest node ID (forward orientation first)
                     let min_handle = unvisited.iter()
                         .min_by_key(|h| {
                             (
-                                path_positions.get(&h.node_id()).copied().unwrap_or(usize::MAX),
-                                h.node_id(),
-                                h.is_reverse()
+                                h.node_id(),        // Lowest node ID (respects SGD ordering)
+                                h.is_reverse()      // Forward before reverse
                             )
                         })
                         .cloned()

@@ -326,32 +326,26 @@ pub fn path_linear_sgd(
                 let curr_updates = term_updates.load(Ordering::Relaxed);
 
                 // ODGI checks: have we done enough updates for THIS iteration?
-                if curr_updates > min_term_updates {
-                    let curr_iter = iteration.load(Ordering::Relaxed);
+                if curr_updates >= min_term_updates {
                     iteration.fetch_add(1, Ordering::Relaxed);
-                    let new_iter = curr_iter + 1;
+                    let new_iter = iteration.load(Ordering::Relaxed);
 
                     // Check stopping conditions BEFORE updating eta
                     if new_iter > iter_max {
                         work_todo.store(false, Ordering::Relaxed);
                     } else {
-                        let curr_delta = u64_to_f64(delta_max.load(Ordering::Relaxed));
-                        if delta > 0.0 && curr_delta <= delta {
-                            work_todo.store(false, Ordering::Relaxed);
-                        } else {
-                            // Update learning rate
-                            if (new_iter as usize) < etas.len() {
-                                eta.store(f64_to_u64(etas[new_iter as usize]), Ordering::Relaxed);
-                            }
+                        // Update learning rate
+                        if (new_iter as usize) < etas.len() {
+                            eta.store(f64_to_u64(etas[new_iter as usize]), Ordering::Relaxed);
+                        }
 
-                            // Reset delta_max to delta threshold
-                            delta_max.store(f64_to_u64(delta), Ordering::Relaxed);
+                        // Don't reset delta_max - let it track the actual maximum update
+                        // (The old code reset to delta which was 0.0, causing premature termination)
 
-                            // Check if we're in cooling phase
-                            if new_iter > first_cooling_iteration {
-                                adj_theta.store(f64_to_u64(0.001), Ordering::Relaxed);
-                                cooling.store(true, Ordering::Relaxed);
-                            }
+                        // Check if we're in cooling phase
+                        if new_iter > first_cooling_iteration {
+                            adj_theta.store(f64_to_u64(0.001), Ordering::Relaxed);
+                            cooling.store(true, Ordering::Relaxed);
                         }
                     }
 

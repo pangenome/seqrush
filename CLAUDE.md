@@ -230,73 +230,97 @@ The core issue isn't about node counts or compaction - it's about **bidirected g
 3. Update GFA writing to use `BidirectedGraph::write_gfa`
 4. Test with RC alignments to verify correctness
 
-## Current Status - Ygs Sorting COMPLETE ✓✓✓
+## Current Status - Layout Quality Optimization (ACTIVE FOCUS)
 
-### SUCCESS: Full Ygs Pipeline Now Working Perfectly!
+### Phase 1 Complete: Structural Correctness ✓
 
-**Final Results (as of 2025-10-17):**
+**Validation Results (as of 2025-10-17):**
 - ✅ **100% success rate**: All 28/28 HLA-Zoo graphs pass ODGI validation
-- ✅ **ZERO changes** when re-sorted by ODGI - SeqRush sorting is already optimal
+- ✅ **ZERO structural changes** when re-sorted by ODGI
 - ✅ **Full Y+g+s pipeline enabled** and working correctly
 - ✅ **All tests passing** in CI
 
-### The Journey: What Was Fixed
+This means: Our graph structure, edge orientations, and pipeline ordering are correct.
 
-**Phase 1: Grooming Bug Discovery**
-- Initial problem: Ygs pipeline with broken grooming produced 64.8% forward edges
-- Discovered that our grooming implementation didn't match ODGI's BFS approach
-- Issue: Using DFS with orientation flipping caused instability
+### Phase 2 Active: Layout Quality (RMSE) Optimization
 
-**Phase 2: Grooming Fix**
-- Implemented exact BFS approach matching ODGI's `groom.cpp`
-- Simple first-visit orientation locking
-- Deterministic edge iteration (sorted by node IDs)
-- Result: 99.97% grooming success rate (29 out of 29,049 samples required flipping)
+**NEW GOAL: Beat ODGI's layout quality**
 
-**Phase 3: Topological Sort Re-enablement**
-- Previously disabled because it degraded performance (76.3% → 64.8%)
-- Root cause: Broken grooming was creating bad graph structure
-- With fixed grooming, topological sort now works perfectly
-- **Critical insight**: Grooming prepares the graph for topological sort to succeed
+While ODGI considers our graphs "structurally optimal" (no node reordering needed), we can still improve the **quality of the 1D layout** - how well node positions match actual genomic distances.
 
-**Phase 4: HashMap→Vec Migration**
-- Fixed remaining HashMap API usage bugs in SGD and other modules
-- Fixed SGD ordering bug that was including phantom node 0
-- All tests now passing in CI
+#### Measurement Methodology
 
-### Technical Details
+Built `measure_layout_quality` tool that calculates RMSE (Root Mean Squared Error):
+- For each consecutive pair of nodes in a path
+- Calculate difference between 1D layout distance and actual genomic distance
+- Lower RMSE = better layout quality
 
-**Files Modified:**
-- `src/groom.rs`: Complete rewrite to match ODGI's BFS approach
-- `src/ygs_sort.rs`: Re-enabled topological sort (previously disabled)
-- `src/path_sgd.rs`: Fixed ordering bug (unwrap_or → filter_map)
-- Multiple files: Completed HashMap→Vec migration
+#### Current Performance Gap (HLA B-3106 benchmark)
 
-**Test Results:**
 ```
-HLA-Zoo Sorting Validation: 28/28 PERFECT
-- All graphs produce ZERO changes when re-sorted by ODGI
-- This means ODGI considers SeqRush's sorting already optimal
+ODGI (SGD only):        RMSE = 25.79 bp  ← Target to beat
+ODGI (full Ygs):        RMSE = 24.86 bp
+SeqRush (full Ygs):     RMSE = 83.23 bp  ← Current (3.2x worse)
 ```
 
-### Key Insights Learned
+**Critical Finding**: The problem is in our SGD implementation, not grooming/topo sort
+- ODGI's SGD alone: 25.79 RMSE
+- Adding g+s improves it only 3.6% (25.79 → 24.86)
+- Our SGD produces layouts 3.2x worse than ODGI's
 
-1. **Grooming is critical**: It prepares the graph structure for topological sort
-   - Without proper grooming: topo sort degrades ordering
-   - With proper grooming: topo sort improves ordering
+#### Hypotheses to Investigate
 
-2. **BFS vs DFS matters**: ODGI uses simple BFS with first-visit locking
-   - DFS with orientation flipping causes instability
-   - BFS with locked orientations is deterministic and stable
+1. **Subtle SGD bugs**:
+   - Parameter calculation differences
+   - Zipfian sampling implementation
+   - Learning rate schedule
+   - Early termination (observed: 2132 updates vs expected 3060)
 
-3. **Pipeline order matters**: Y → g → s must be done in sequence
-   - SGD establishes initial ordering
-   - Grooming fixes orientation issues
-   - Topological sort refines based on cleaned structure
+2. **Topological sort issues**:
+   - May not respect SGD output enough
+   - Could be applying too aggressive reordering
+   - Different application strategy needed
 
-### Current Implementation Quality
+3. **Nonlinearity handling**:
+   - Graph has nonlinearities everywhere (bubbles, alternatives)
+   - Random node sampling may not respect local structure
+   - Could benefit from segmentation/annealing approach
+   - Need to identify which portions should be partially ordered
 
-- **SGD**: Matches ODGI (within 0.9%)
-- **Grooming**: Matches ODGI (99.97% success rate)
-- **Topological Sort**: Now working correctly with proper grooming
-- **Overall**: Full Ygs pipeline produces ODGI-optimal results
+4. **Starting point selection**:
+   - Currently choosing nodes randomly
+   - May need smarter initialization or anchor points
+   - Could leverage path structure for better sampling
+
+#### Tools & Scripts
+
+- **Measure quality**: `./target/release/measure_layout_quality <graph.gfa>`
+- **Benchmark vs ODGI**: `./test_sgd_only.sh` (compares SGD quality)
+- **HLA validation**: `./test_hla_simple.sh` (checks structural correctness)
+
+#### Investigation Strategy
+
+**Goal**: Systematically improve RMSE while maintaining structural correctness
+**Constraint**: Never degrade below current HLA validation results (28/28 perfect)
+
+1. Isolate SGD performance (test Y step alone)
+2. Compare parameter-by-parameter with ODGI
+3. Test hypotheses about nonlinearity handling
+4. Validate improvements on full HLA-Zoo dataset
+
+### Historical Context: What Was Fixed
+
+**Phase 1: Grooming Bug** (COMPLETE)
+- Problem: DFS with orientation flipping caused instability
+- Solution: Exact BFS approach matching ODGI
+- Result: 99.97% grooming success rate
+
+**Phase 2: Topological Sort** (COMPLETE)
+- Problem: Disabled because it degraded performance
+- Solution: Fixed grooming first, then re-enabled topo sort
+- Result: Now works correctly with proper grooming
+
+**Phase 3: HashMap→Vec Migration** (COMPLETE)
+- Problem: Vec API usage bugs, phantom node 0 in ordering
+- Solution: Fixed all HashMap patterns, used filter_map instead of unwrap_or
+- Result: All tests passing in CI

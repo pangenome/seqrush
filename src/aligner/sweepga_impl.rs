@@ -1,17 +1,16 @@
-/// SweepGA aligner implementation
+/// SweepGA aligner implementation using modern sweepga library API
 use super::{Aligner, AlignmentRecord, AlignmentSequence};
-use anyhow::Result;
 use std::error::Error;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
-use fastga_rs::{Config, FastGA};
+use std::io::Write;
+use std::path::Path;
+use sweepga::fastga_integration::FastGAIntegration;
+use sweepga::paf_filter::{FilterConfig, FilterMode, PafFilter, ScoringFunction};
 use tempfile::NamedTempFile;
 
 pub struct SweepgaAligner {
-    fastga: FastGA,
+    frequency: Option<usize>,
+    threads: usize,
     verbose: bool,
-    temp_dir: Option<PathBuf>,
 }
 
 impl SweepgaAligner {
@@ -20,22 +19,10 @@ impl SweepgaAligner {
         threads: usize,
         verbose: bool,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut config_builder = Config::builder()
-            .num_threads(threads)
-            .verbose(verbose);
-
-        if let Some(freq) = frequency {
-            config_builder = config_builder.adaptive_seed_cutoff(freq);
-        }
-
-        let config = config_builder.build();
-        let fastga = FastGA::new(config)
-            .map_err(|e| format!("Failed to create FastGA: {}", e))?;
-
         Ok(SweepgaAligner {
-            fastga,
+            frequency,
+            threads,
             verbose,
-            temp_dir: None,
         })
     }
 
@@ -44,11 +31,7 @@ impl SweepgaAligner {
         &self,
         sequences: &[AlignmentSequence],
     ) -> Result<NamedTempFile, Box<dyn Error>> {
-        let mut temp_fasta = if let Some(dir) = &self.temp_dir {
-            NamedTempFile::new_in(dir)?
-        } else {
-            NamedTempFile::new()?
-        };
+        let mut temp_fasta = NamedTempFile::new()?;
 
         for seq in sequences {
             writeln!(temp_fasta, ">{}", seq.id)?;
@@ -63,9 +46,8 @@ impl SweepgaAligner {
 
         if self.verbose {
             eprintln!(
-                "[sweepga] Wrote {} sequences to {}",
-                sequences.len(),
-                temp_fasta.path().display()
+                "[sweepga] Wrote {} sequences to temporary FASTA",
+                sequences.len()
             );
         }
 
@@ -74,6 +56,9 @@ impl SweepgaAligner {
 
     /// Parse PAF file into alignment records
     fn parse_paf(&self, paf_path: &Path) -> Result<Vec<AlignmentRecord>, Box<dyn Error>> {
+        use std::fs::File;
+        use std::io::{BufRead, BufReader};
+
         let file = File::open(paf_path)?;
         let reader = BufReader::new(file);
         let mut records = Vec::new();
@@ -115,7 +100,7 @@ impl SweepgaAligner {
         }
 
         if self.verbose {
-            eprintln!("[sweepga] Parsed {} alignment records", records.len());
+            eprintln!("[sweepga] Parsed {} alignment records from PAF", records.len());
         }
 
         Ok(records)
@@ -128,49 +113,85 @@ impl Aligner for SweepgaAligner {
         sequences: &[AlignmentSequence],
     ) -> Result<Vec<AlignmentRecord>, Box<dyn Error>> {
         if self.verbose {
-            eprintln!("[sweepga] Aligning {} sequences", sequences.len());
+            eprintln!("[sweepga] Starting alignment of {} sequences", sequences.len());
         }
 
-        // Write sequences to a persistent temp file (not auto-deleted)
+        // Step 1: Write sequences to temp FASTA
         let temp_fasta = self.write_sequences_to_fasta(sequences)?;
-        let fasta_path = temp_fasta.path().to_path_buf();
-
-        // Keep the temp file alive by persisting it
-        let (_file, fasta_path) = temp_fasta.keep()?;
+        let fasta_path = temp_fasta.path();
 
         if self.verbose {
-            eprintln!("[sweepga] FASTA written to: {}", fasta_path.display());
+            eprintln!("[sweepga] Running FastGA alignment (frequency: {:?}, threads: {})",
+                self.frequency, self.threads);
         }
 
-        // Use fastga-rs to align and write directly to PAF
-        if self.verbose {
-            eprintln!("[sweepga] Running FastGA alignment...");
-        }
-
-        // Create temp PAF file
-        let paf_temp = NamedTempFile::new()?;
-
-        // Call FastGA align_to_file
-        let num_alignments = self.fastga.align_to_file(&fasta_path, &fasta_path, paf_temp.path())
-            .map_err(|e| anyhow::anyhow!("FastGA alignment failed: {}", e))?;
+        // Step 2: Run FastGA alignment using sweepga library
+        let fastga = FastGAIntegration::new(self.frequency, self.threads);
+        let temp_paf = fastga.align_to_temp_paf(fasta_path, fasta_path)
+            .map_err(|e| format!("FastGA alignment failed: {}", e))?;
 
         if self.verbose {
-            eprintln!("[sweepga] FastGA produced {} alignments", num_alignments);
+            // Count lines in PAF
+            use std::fs;
+            let paf_content = fs::read_to_string(temp_paf.path())?;
+            let line_count = paf_content.lines()
+                .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+                .count();
+            eprintln!("[sweepga] FastGA produced {} raw alignments", line_count);
         }
 
-        // Parse PAF output
-        let records = self.parse_paf(paf_temp.path())?;
+        // Step 3: Apply 1:1 plane sweep filtering for clean graph construction
+        if self.verbose {
+            eprintln!("[sweepga] Applying 1:1 plane sweep filtering...");
+        }
+
+        let filter_config = FilterConfig {
+            mapping_filter_mode: FilterMode::OneToOne,
+            mapping_max_per_query: Some(1),
+            mapping_max_per_target: Some(1),
+            scoring_function: ScoringFunction::LogLengthIdentity,
+            overlap_threshold: 0.95,
+            min_block_length: 100,  // Filter out very short alignments
+            scaffold_filter_mode: FilterMode::ManyToMany,  // No scaffolding
+            scaffold_max_per_query: None,
+            scaffold_max_per_target: None,
+            plane_sweep_secondaries: 0,
+            sparsity: 1.0,
+            no_merge: true,
+            chain_gap: 2000,
+            scaffold_gap: 10000,
+            min_scaffold_length: 0,
+            scaffold_overlap_threshold: 0.95,
+            scaffold_max_deviation: 0,
+            prefix_delimiter: '#',
+            skip_prefix: false,
+            min_identity: 0.0,
+            min_scaffold_identity: 0.0,
+        };
+
+        let temp_filtered = NamedTempFile::new()?;
+        let filter = PafFilter::new(filter_config);
+        filter.filter_paf(
+            temp_paf.path().to_str().unwrap(),
+            temp_filtered.path().to_str().unwrap()
+        ).map_err(|e| format!("PAF filtering failed: {}", e))?;
 
         if self.verbose {
-            eprintln!("[sweepga] Alignment complete: {} records", records.len());
+            // Count filtered lines
+            use std::fs;
+            let filtered_content = fs::read_to_string(temp_filtered.path())?;
+            let filtered_count = filtered_content.lines()
+                .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+                .count();
+            eprintln!("[sweepga] After 1:1 filtering: {} alignments", filtered_count);
         }
 
-        // Clean up temp FASTA
-        let _ = std::fs::remove_file(&fasta_path);
-        let gdb_path = fasta_path.with_extension("1gdb");
-        let _ = std::fs::remove_file(&gdb_path);
-        let bps_path = format!(".{}.bps", fasta_path.file_name().unwrap().to_string_lossy());
-        let _ = std::fs::remove_file(fasta_path.parent().unwrap().join(&bps_path));
+        // Step 4: Parse filtered PAF
+        let records = self.parse_paf(temp_filtered.path())?;
+
+        if self.verbose {
+            eprintln!("[sweepga] Alignment complete: {} final records", records.len());
+        }
 
         Ok(records)
     }
