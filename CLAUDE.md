@@ -1,361 +1,181 @@
-# SeqRush Development - Graph Construction Investigation
+# SeqRush Development Guide
 
-## Iterative Alignment Feature (NEW - In Progress)
+## Current Focus: Iterative Alignment Feature
 
 ### Overview
-Implementing iterative graph construction with stabilization detection to reduce computational work.
+Implementing iterative graph construction with stabilization detection to reduce computational work by processing alignment pairs in priority order and stopping early when the graph converges.
 
-### Status
-- ✅ Added `--iterative` CLI flag to seqrush.rs
-- ✅ Flag is recognized and shows in `--help` output
-- ❌ Implementation not yet ported from seqrush_clean.rs
-- ❌ Calling `--iterative` shows error message directing to implementation
+### Status (2025-10-18)
+- ✅ `--iterative` CLI flag added to Args struct (src/seqrush.rs:149)
+- ✅ Flag recognized in `--help` output
+- ✅ Build integration added (src/seqrush.rs:346-353)
+- ❌ **NOT YET FUNCTIONAL** - shows error message directing to implementation
+- ❌ Implementation needs to be ported from seqrush_clean.rs
 
-### Implementation Approach
-The feature uses AllWave's TreeSampling sparsification to get a prioritized pair list, then:
-1. Process pairs in priority order (k-nearest + k-farthest + random)
-2. Track union-find component count after each alignment
-3. Stop early when graph stabilizes (N consecutive checks with no change)
+### Implementation Plan
 
-### Technical Challenges
-**seqrush_clean.rs uses simple UFRush** while **seqrush.rs uses BidirectedUnionFind**:
-- Different union-find APIs
-- Different coordinate systems (simple vs oriented positions)
-- Different RC handling approaches
+**Core Algorithm** (from seqrush_clean.rs:218-359):
+1. Use AllWave TreeSampling to get prioritized pair list (k-nearest + k-farthest + random)
+2. Process pairs iteratively in priority order
+3. After every 10 pairs, count union-find components
+4. Stop early if component count doesn't change for N consecutive checks (N=10)
 
-### Next Steps
-1. Port `count_components()` method to work with BidirectedUnionFind
+**Technical Challenge:**
+- seqrush_clean.rs uses simple `UFRush` (lock-free union-find over usize positions)
+- seqrush.rs uses `BidirectedUnionFind` (handles oriented positions with Pos type)
+- Different APIs, coordinate systems, and RC handling
+
+**Required Work:**
+1. Port `count_components()` to work with BidirectedUnionFind's Pos type
 2. Adapt `align_and_unite_iterative()` to use seqrush.rs's alignment infrastructure
-3. Test on simple sequences
-4. Benchmark work reduction vs full alignment
-5. Verify graph equivalence between iterative and full modes
+3. Test on simple sequences (/tmp/test_iter.fa)
+4. Benchmark: does it reduce work while producing equivalent graphs?
 
-### Code Locations
-- **CLI flag**: src/seqrush.rs:149 (`iterative: bool`)
-- **Build integration**: src/seqrush.rs:346-353 (currently shows error message)
-- **Reference implementation**: src/seqrush_clean.rs:218-359
-
-## Problem Statement - BIDIRECTED GRAPH IMPLEMENTED
-
-SeqRush now correctly handles bidirected graphs but still produces more nodes than seqwish:
-- SeqRush (current with bidirected graph): 7440 nodes (single-base nodes)
-- Seqwish: 476 nodes (variable-length compacted nodes)
-- Both tools process identical alignments (verified by running seqwish on SeqRush's PAF)
-
-## Root Cause Analysis
-
-### Key Findings
-1. **Missing self-alignments**: SeqRush was excluding self-alignments, causing fragmentation
-2. **PAF strand misinterpretation**: When PAF shows query strand '-', it means the QUERY was reverse complemented, not the target
-3. **The union-find was correct**: The issue was in alignment processing, not the graph construction algorithm
-
-### Diagnostic Results
-1. **Union component distribution**: 2397 components total
-   - 1064 single-position components (unique positions)
-   - 552 components with 8 positions (likely shared across 8/9 sequences)
-   - 285 components with 9 positions (shared across all sequences)
-2. **Position sharing**: Verified that matching positions across sequences are correctly united
-3. **Self-alignments**: Now included and processed correctly
-4. **Union-find tests**: All 9 tests pass, confirming correct transitive closure
-
-### Core Issue
-The fundamental difference between seqrush and seqwish:
-- **Seqrush**: Creates one node per base position (after union-find)
-- **Seqwish**: Creates variable-length nodes through compaction during graph construction
-
-The bidirected graph implementation is working correctly, but SeqRush creates single-base nodes while seqwish performs compaction to create longer nodes.
-
-## Seqwish Algorithm Understanding
-
-### Key Components
-1. **Input**: Sequences + all-vs-all alignments (INCLUDING self-alignments)
-2. **Position encoding**: Each position has offset + orientation (forward/reverse)
-3. **Transitive closure**: Union-find ensures if A matches B and B matches C, then A,B,C are in same component
-4. **Graph construction**: Each union component becomes a node
-5. **Compaction**: Linear chains are merged
-
-### Critical Implementation Details
-- Self-alignments establish sequence backbone
-- Reverse complement handling requires careful position mapping
-- All positions in a union component must have compatible bases
-
-## Bidirected Graph Implementation
-
-### The Critical Bug: Bidirected Graph Support
-**SeqRush was failing to handle reverse complement alignments correctly!**
-
-When sequences align via reverse complement:
-- Simple unidirectional graphs cannot represent these relationships
-- Paths would incorrectly traverse nodes "backwards"
-- This created invalid graphs where sequences couldn't be reconstructed
-
-### Solution: Bidirected Graph
-Implemented full bidirected graph support following seqwish's approach:
-1. **Handle type**: Encodes node ID + orientation in 64-bit value (LSB = orientation)
-2. **Bidirected edges**: Connect oriented node references (e.g., 5+ → 6-, meaning forward strand of node 5 connects to reverse strand of node 6)
-3. **Oriented paths**: Sequences traverse nodes with specific orientations (e.g., "1+,2+,3-,4+" means traverse nodes 1,2 forward, node 3 reverse, node 4 forward)
-
-### Implementation Details
-- Created `bidirected_builder.rs` to build bidirected graphs from union-find results
-- Modified `write_gfa` to output oriented edges and paths
-- Handles both forward and reverse complement alignments correctly
-- Validated with test cases showing proper sequence reconstruction
-
-### Current Status
-- ✅ Bidirected graph correctly handles RC alignments
-- ✅ Produces valid GFA with oriented paths
-- ❌ Still creates too many nodes compared to seqwish (needs compaction)
-
-## Test Suite Design
-
-Created comprehensive tests in `tests/test_graph_construction.rs`:
-1. **test_self_alignment_creates_backbone**: Verify self-alignments work
-2. **test_two_identical_sequences**: Identical sequences should share nodes
-3. **test_reverse_complement_alignment**: RC alignments handled correctly
-4. **test_transitive_closure**: A→B, B→C implies A→C
-5. **test_partial_alignment**: Partial matches create appropriate unions
-6. **test_complex_cigar**: Complex CIGAR strings parsed correctly
-7. **test_min_match_length**: Minimum match length filtering
-8. **test_graph_node_creation**: Union components map to nodes correctly
-9. **test_integration_with_real_sequences**: Realistic multi-sequence example
-
-## Fixes Implemented
-
-### Fix 1: Include Self-Alignments
-Changed `exclude_self: true` to `exclude_self: false` in alignment processing
-- Self-alignments establish the backbone structure of each sequence
-- Without them, positions within the same sequence aren't united
-
-### Fix 2: Correct PAF Strand Interpretation
-Fixed misinterpretation of PAF strand information:
-- When PAF shows query strand '-', the QUERY was reverse complemented
-- Updated `process_alignment` to handle `query_is_rc` instead of `seq2_is_rc`
-- Updated `unite_matching_region` to transform query coordinates when RC'd
-
-### Fix 3: Add Validation
-Added comprehensive validation to catch coordinate mismatches:
-- Validates that bases being united actually match
-- Provides detailed error messages when mismatches occur
-- Helped identify the PAF strand interpretation issue
-
-## Compaction Algorithm (NEW)
-
-The compaction algorithm has been redesigned based on a key mathematical insight: **path traversals ARE the links**. The algorithm is documented in detail in `docs/compaction_algorithm.md`.
-
-Key points:
-1. Build connection maps directly from path traversals (not edges)
-2. Two nodes are perfect neighbors if:
-   - Node A only connects to node B (outbound[A] == {B})
-   - Node B only receives from node A (inbound[B] == {A})
-3. If any difference exists in connection patterns, nodes cannot be merged
-
-Implementation status:
-- ✅ Algorithm documented in `docs/compaction_algorithm.md`
-- ✅ Compaction code updated to use path-based connections
-- ✅ Workaround script `visualize_hla.sh` uses odgi for compaction
-
-## Next Steps
-
-1. Test the new path-based compaction algorithm
-2. Debug any remaining issues with reverse-oriented node handling
-3. Validate that compacted graphs match seqwish output
-
-## Command Reference
-
+### Testing Command
 ```bash
-# Run tests
-cargo test test_graph_construction
+# Currently shows error message:
+./target/release/seqrush -s /tmp/test_iter.fa -o /tmp/test.gfa -k 0 --iterative
 
-# Debug with verbose output
-cargo run --release --bin seqrush -- -s HLA-zoo/seqs/B-3106.fa -o b.gfa -k 0 -v
-
-# Compare with seqwish
-allwave -t 8 -i HLA-zoo/seqs/B-3106.fa >b.paf
-seqwish -s HLA-zoo/seqs/B-3106.fa -p b.paf -g b.seqwish.gfa
-
-# Check graph stats
-odgi stats -i b.gfa -S
+# Expected behavior after implementation:
+# - Align pairs in priority order
+# - Print progress showing component count evolution
+# - Stop early when graph stabilizes
+# - Produce same graph as non-iterative mode
 ```
 
-## Success Criteria
+---
 
-1. All tests in test_graph_construction.rs pass ✓
-2. Node count within 10% of seqwish for same input ✓ (466 vs 471 - within 1%)
-3. Paths correctly preserve input sequences ✓
-4. Graph is properly connected ✓
+## Production Status: Graph Construction
 
-## Key Insights - UPDATED
+### Current Quality (2025-10-17)
+✅ **Structural Validation**: 100% success (28/28 HLA-Zoo graphs pass ODGI validation with ZERO changes)
+- Bidirected graph implementation is correct
+- Full Ygs pipeline (SGD + groom + topo sort) working
+- Edge orientations and path handling verified
 
-1. **Bidirected graph support added**: SeqRush now correctly handles reverse complement alignments
-2. **Self-alignments are critical**: Fixed by changing `exclude_self` from true to false
-3. **PAF strand interpretation**: Fixed by recognizing that query strand '-' means query is RC'd
-4. **Remaining issue**: Node count difference due to compaction - SeqRush creates single-base nodes while seqwish creates variable-length nodes
-
-## Current Understanding
-
-### The Critical Bug: Bidirected Graph Support
-
-**SeqRush fails to handle reverse complement alignments correctly!**
-
-Test with sequences where only RC alignment exists:
-- Input: "AAAAACCCCCTTTTT" and "AAAAAGGGGGTTTTTT" (RC of each other)
-- Seqwish output: Proper bidirected graph with 2 nodes and reverse paths
-- SeqRush output: Invalid graph with forward path going BACKWARDS through nodes!
-
-**The fundamental issue:**
-1. SeqRush uses a simple unidirectional `Graph` structure
-2. All edges are written as `L from + to + 0M` (always forward)
-3. All path steps are written as `node+` (always forward)
-4. The bidirected nature of sequence graphs is completely lost
-
-**Result:** When RC alignments exist, SeqRush creates invalid graphs where paths traverse nodes in the wrong direction to try to represent the RC relationship.
-
-### How Seqwish Handles RC Alignments (from source analysis)
-
-1. **Position encoding**: Each position stores offset + orientation in 64-bit value
-   - LSB = orientation (0=forward, 1=reverse)
-   - Upper bits = position offset
-
-2. **PAF parsing**: When strand field is '-', query was reverse complemented
-   ```cpp
-   bool q_rev = !paf.query_target_same_strand;
-   pos_t q_pos = make_pos_t(q_all_pos, q_rev);
-   pos_t t_pos = make_pos_t(t_all_pos, false);
-   ```
-
-3. **Bidirectional alignment storage**: Both directions stored in interval tree
-   ```cpp
-   if (is_rev(q_pos)) {
-       // Store bidirectional mappings for RC alignments
-       aln_iitree.add(..., make_pos_t(..., true));
-   }
-   ```
-
-4. **Graph construction**: Creates bidirected edges with proper orientations
-   - Nodes can be traversed in both directions
-   - Paths include orientation for each step (e.g., "1+,2-,3+")
-
-### Key Insight
-
-The core issue isn't about node counts or compaction - it's about **bidirected graph support**. SeqRush's simple `Graph` structure cannot represent reverse complement relationships, leading to invalid graphs.
-
-## Solution Approach
-
-### Required Changes:
-
-1. **Use BidirectedGraph instead of Graph**
-   - Already exists in `src/bidirected_graph.rs` and `src/bidirected_ops.rs`
-   - Supports Handle objects with orientation
-   - Can write proper GFA with orientations
-
-2. **Fix path construction**
-   - Track orientation when building paths from union-find
-   - When a position was united via RC alignment, use reverse orientation
-   - Path steps should be Handle objects, not just node IDs
-
-3. **Fix union-find usage**
-   - Current code correctly unites positions with orientations
-   - But graph construction ignores this information
-   - Need to preserve orientation when mapping positions to nodes
-
-## Implementation Steps
-
-1. Modify `build_initial_graph` to return `BidirectedGraph`
-2. Track position orientations when creating nodes and paths
-3. Update GFA writing to use `BidirectedGraph::write_gfa`
-4. Test with RC alignments to verify correctness
-
-## Current Status - Layout Quality Optimization (ACTIVE FOCUS)
-
-### Phase 1 Complete: Structural Correctness ✓
-
-**Validation Results (as of 2025-10-17):**
-- ✅ **100% success rate**: All 28/28 HLA-Zoo graphs pass ODGI validation
-- ✅ **ZERO structural changes** when re-sorted by ODGI
-- ✅ **Full Y+g+s pipeline enabled** and working correctly
-- ✅ **All tests passing** in CI
-
-This means: Our graph structure, edge orientations, and pipeline ordering are correct.
-
-### Phase 2 Active: Layout Quality (RMSE) Optimization
-
-**NEW GOAL: Beat ODGI's layout quality**
-
-While ODGI considers our graphs "structurally optimal" (no node reordering needed), we can still improve the **quality of the 1D layout** - how well node positions match actual genomic distances.
-
-#### Measurement Methodology
-
-Built `measure_layout_quality` tool that calculates RMSE (Root Mean Squared Error):
-- For each consecutive pair of nodes in a path
-- Calculate difference between 1D layout distance and actual genomic distance
-- Lower RMSE = better layout quality
-
-#### Current Performance Gap (HLA B-3106 benchmark)
-
+⚠️ **Layout Quality Gap**: RMSE 3.2x worse than ODGI
 ```
-ODGI (SGD only):        RMSE = 25.79 bp  ← Target to beat
-ODGI (full Ygs):        RMSE = 24.86 bp
+ODGI (full Ygs):        RMSE = 24.86 bp  ← Target
 SeqRush (full Ygs):     RMSE = 83.23 bp  ← Current (3.2x worse)
 ```
 
-**Critical Finding**: The problem is in our SGD implementation, not grooming/topo sort
-- ODGI's SGD alone: 25.79 RMSE
-- Adding g+s improves it only 3.6% (25.79 → 24.86)
-- Our SGD produces layouts 3.2x worse than ODGI's
+**Root cause**: SGD implementation differences (parameter calculation, sampling strategy, or early termination)
 
-#### Hypotheses to Investigate
+### Command Reference
+```bash
+# Build graph with full Ygs pipeline (default)
+./target/release/seqrush -s input.fa -o output.gfa -k 0
 
-1. **Subtle SGD bugs**:
-   - Parameter calculation differences
-   - Zipfian sampling implementation
-   - Learning rate schedule
-   - Early termination (observed: 2132 updates vs expected 3060)
+# Skip specific pipeline stages
+./target/release/seqrush -s input.fa -o output.gfa -k 0 --skip-sgd
+./target/release/seqrush -s input.fa -o output.gfa -k 0 --skip-groom
+./target/release/seqrush -s input.fa -o output.gfa -k 0 --skip-topo
 
-2. **Topological sort issues**:
-   - May not respect SGD output enough
-   - Could be applying too aggressive reordering
-   - Different application strategy needed
+# Validate against ODGI
+./test_hla_simple.sh  # Tests all HLA-Zoo graphs
+```
 
-3. **Nonlinearity handling**:
-   - Graph has nonlinearities everywhere (bubbles, alternatives)
-   - Random node sampling may not respect local structure
-   - Could benefit from segmentation/annealing approach
-   - Need to identify which portions should be partially ordered
+---
 
-4. **Starting point selection**:
-   - Currently choosing nodes randomly
-   - May need smarter initialization or anchor points
-   - Could leverage path structure for better sampling
+## Architecture Notes
 
-#### Tools & Scripts
+### Key Modules
+- **src/seqrush.rs** - Production implementation (uses BidirectedUnionFind, full pipeline)
+- **src/seqrush_clean.rs** - Simple implementation (uses UFRush, reference for iterative mode)
+- **src/bidirected_union_find.rs** - Union-find for oriented positions (Pos type)
+- **src/bidirected_builder.rs** - Builds bidirected graphs from union-find results
+- **src/aligner/allwave_impl.rs** - AllWave aligner wrapper with prioritized pairs
 
-- **Measure quality**: `./target/release/measure_layout_quality <graph.gfa>`
-- **Benchmark vs ODGI**: `./test_sgd_only.sh` (compares SGD quality)
-- **HLA validation**: `./test_hla_simple.sh` (checks structural correctness)
+### Graph Construction Pipeline
+```
+Load FASTA
+  ↓
+Align all-vs-all (AllWave/SweepGA)
+  ↓
+Unite matching positions (BidirectedUnionFind)
+  ↓
+Build bidirected graph from union components
+  ↓
+Compact linear chains (if --no-compact not set)
+  ↓
+Apply Ygs sorting:
+  - Y: Path-guided SGD layout
+  - g: Grooming (flip orientations for consistency)
+  - s: Topological sort
+  ↓
+Write GFA
+```
 
-#### Investigation Strategy
+### Important Implementation Details
 
-**Goal**: Systematically improve RMSE while maintaining structural correctness
-**Constraint**: Never degrade below current HLA validation results (28/28 perfect)
+**Bidirected Graph (CRITICAL)**:
+- Handles forward AND reverse complement alignments
+- Each node has two orientations (forward/reverse)
+- Edges connect oriented nodes: `5+ → 6-` means "forward strand of node 5 connects to reverse strand of node 6"
+- Paths include orientations: `1+,2+,3-,4+` means "traverse nodes 1,2 forward, 3 reverse, 4 forward"
+- Without bidirected support, RC alignments create invalid graphs
 
-1. Isolate SGD performance (test Y step alone)
-2. Compare parameter-by-parameter with ODGI
-3. Test hypotheses about nonlinearity handling
-4. Validate improvements on full HLA-Zoo dataset
+**Union-Find**:
+- Positions encoded as `Pos` type (offset + orientation bit)
+- LSB encodes orientation: even=forward, odd=reverse
+- `unite_matching_region()` handles RC coordinate transformation
+- BidirectedUnionFind ensures forward/reverse of same position are united
 
-### Historical Context: What Was Fixed
+**Alignment Processing**:
+- CIGAR parsing: only unite exact matches ('M' ops checked base-by-base)
+- Minimum match length filtering (default k=0)
+- Self-alignments MUST be included (establish sequence backbone)
+- When PAF strand='-', the QUERY was reverse complemented (not target)
 
-**Phase 1: Grooming Bug** (COMPLETE)
-- Problem: DFS with orientation flipping caused instability
-- Solution: Exact BFS approach matching ODGI
-- Result: 99.97% grooming success rate
+---
 
-**Phase 2: Topological Sort** (COMPLETE)
-- Problem: Disabled because it degraded performance
-- Solution: Fixed grooming first, then re-enabled topo sort
-- Result: Now works correctly with proper grooming
+## Historical Context (Collapsed Issues - RESOLVED)
 
-**Phase 3: HashMap→Vec Migration** (COMPLETE)
-- Problem: Vec API usage bugs, phantom node 0 in ordering
-- Solution: Fixed all HashMap patterns, used filter_map instead of unwrap_or
-- Result: All tests passing in CI
+<details>
+<summary>Click to expand resolved issues</summary>
+
+### Issue 1: Missing Self-Alignments (FIXED)
+**Problem**: Excluding self-alignments caused graph fragmentation
+**Solution**: Changed `exclude_self: true` → `exclude_self: false`
+**Result**: Positions within sequences now properly united
+
+### Issue 2: PAF Strand Misinterpretation (FIXED)
+**Problem**: Incorrectly assumed target was RC'd when strand='-'
+**Solution**: Recognize that strand='-' means QUERY was RC'd
+**Result**: RC alignments now processed correctly
+
+### Issue 3: Grooming Instability (FIXED)
+**Problem**: DFS with orientation flipping caused non-deterministic results
+**Solution**: Exact BFS implementation matching ODGI
+**Result**: 99.97% grooming success rate
+
+### Issue 4: Vec Migration Bugs (FIXED)
+**Problem**: HashMap→Vec migration introduced phantom node 0
+**Solution**: Fixed all HashMap patterns, used filter_map correctly
+**Result**: All tests passing in CI
+
+</details>
+
+---
+
+## Quick Start for Development
+
+```bash
+# Test with simple sequences
+cat > /tmp/test.fa << 'EOF'
+>seq1
+ACGTACGTACGT
+>seq2
+ACGTACGTACGT
+>seq3
+ACGTACGTACGT
+EOF
+
+./target/release/seqrush -s /tmp/test.fa -o /tmp/test.gfa -k 0 -v
+
+# Validate output
+odgi stats -i /tmp/test.gfa -S
+
+# Run full HLA-Zoo validation
+./test_hla_simple.sh
+```
