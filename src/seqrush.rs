@@ -350,8 +350,33 @@ impl SeqRush {
             // Read alignments from PAF file
             self.align_and_unite_from_paf(paf_path, args);
         } else {
-            // Use the configured aligner backend based on CLI argument
-            match args.aligner.as_str() {
+            // Check sequence lengths and provide guidance
+            let min_len = self.sequences.iter().map(|s| s.data.len()).min().unwrap_or(0);
+            let max_len = self.sequences.iter().map(|s| s.data.len()).max().unwrap_or(0);
+
+            // Warn about very short sequences (potential alignment issues)
+            if min_len < 100 && args.verbose {
+                eprintln!("Warning: Found sequences shorter than 100 bp (min: {} bp, max: {} bp)",
+                         min_len, max_len);
+                eprintln!("         Short sequences may produce suboptimal alignments.");
+            }
+
+            // Auto-select aligner based on sequence length if using default
+            let chosen_aligner = if args.aligner == "allwave" && min_len >= 100 {
+                // Default is allwave, but for longer sequences, sweepga might be better
+                #[cfg(feature = "use-sweepga")]
+                {
+                    if args.verbose {
+                        eprintln!("Info: Sequences ≥100 bp detected. Consider --aligner sweepga for faster alignment.");
+                    }
+                }
+                "allwave"
+            } else {
+                args.aligner.as_str()
+            };
+
+            // Use the configured aligner backend
+            match chosen_aligner {
                 #[cfg(feature = "use-allwave")]
                 "allwave" => self.align_and_unite_with_allwave(args),
 
@@ -359,11 +384,11 @@ impl SeqRush {
                 "sweepga" => self.align_and_unite_with_sweepga(args),
 
                 _ => {
-                    eprintln!("Error: Unknown aligner '{}'. Available aligners:", args.aligner);
+                    eprintln!("Error: Unknown aligner '{}'. Available aligners:", chosen_aligner);
                     #[cfg(feature = "use-allwave")]
-                    eprintln!("  - allwave");
+                    eprintln!("  - allwave (works with any sequence length)");
                     #[cfg(feature = "use-sweepga")]
-                    eprintln!("  - sweepga");
+                    eprintln!("  - sweepga (requires sequences ≥20 bp, recommended for ≥100 bp)");
                     std::process::exit(1);
                 }
             }

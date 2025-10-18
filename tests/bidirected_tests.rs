@@ -72,6 +72,7 @@ fn test_simple_forward_sequence() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

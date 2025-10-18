@@ -111,6 +111,7 @@ fn test_inverted_repeats() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_inversion_aware_seqrush(args).unwrap();

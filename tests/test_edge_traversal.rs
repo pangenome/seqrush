@@ -57,6 +57,7 @@ fn test_no_untraversed_edges_in_output() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     run_seqrush(args).unwrap();

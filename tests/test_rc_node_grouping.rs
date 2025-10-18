@@ -45,6 +45,7 @@ fn test_rc_sequences_share_nodes() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     let output_path = args.output.clone();
@@ -136,6 +137,7 @@ fn test_node_sequence_consistency() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
 
     let output_path = args.output.clone();

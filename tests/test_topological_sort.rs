@@ -47,6 +47,7 @@ fn test_sorting_creates_sequential_node_ids() {
             sgd_sort: false,
             groom: false,
         aligner: "allwave".to_string(),
+        frequency: None,
     };
     
     run_seqrush(args_sorted).unwrap();

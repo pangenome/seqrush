@@ -52,7 +52,7 @@ fn test_transitive_closure() {
         offset: 8,
     };
 
-    let mut seqrush = SeqRush::new(vec![seq1, seq2, seq3], 0);
+    let seqrush = SeqRush::new(vec![seq1, seq2, seq3], 0);
 
     // Unite seq1[0] with seq2[0]
     seqrush
@@ -90,7 +90,7 @@ fn test_single_component_per_position() {
         },
     ];
 
-    let mut seqrush = SeqRush::new(sequences, 0);
+    let seqrush = SeqRush::new(sequences, 0);
 
     // Unite matching positions
     seqrush
@@ -132,7 +132,7 @@ fn test_reverse_complement_alignment() {
         offset: 4,
     };
 
-    let mut seqrush = SeqRush::new(vec![seq1, seq2], 0);
+    let seqrush = SeqRush::new(vec![seq1, seq2], 0);
 
     // seq1 aligns to seq2 via reverse complement
     // seq1[0..4] RC aligns to seq2[0..4]
@@ -186,7 +186,7 @@ fn test_identical_sequences_produce_minimal_components() {
         },
     ];
 
-    let mut seqrush = SeqRush::new(sequences, 0);
+    let seqrush = SeqRush::new(sequences, 0);
 
     // Unite all matching positions
     seqrush
@@ -264,7 +264,7 @@ fn test_partial_alignment() {
         offset: 12,
     };
 
-    let mut seqrush = SeqRush::new(vec![seq1, seq2], 0);
+    let seqrush = SeqRush::new(vec![seq1, seq2], 0);
 
     // Only the GGGG region matches (positions 4-7 in seq1, 4-7 in seq2)
     seqrush
