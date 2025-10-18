@@ -635,6 +635,20 @@ impl SeqRush {
         use sweepga::paf_filter::{FilterConfig, FilterMode, PafFilter, ScoringFunction};
         use tempfile::NamedTempFile;
 
+        // Guard against very short sequences that cause FastGA to segfault
+        let min_len = self.sequences.iter().map(|s| s.data.len()).min().unwrap_or(0);
+        const MIN_SEQ_LENGTH: usize = 20;
+
+        if min_len < MIN_SEQ_LENGTH {
+            eprintln!(
+                "Error: SweepGA aligner requires sequences of at least {} bp.",
+                MIN_SEQ_LENGTH
+            );
+            eprintln!("       Found sequence with length {} bp.", min_len);
+            eprintln!("       Use --aligner allwave for shorter sequences.");
+            std::process::exit(1);
+        }
+
         if args.verbose {
             println!("Using SweepGA aligner (FastGA + plane sweep filtering)");
             if let Some(freq) = args.frequency {
