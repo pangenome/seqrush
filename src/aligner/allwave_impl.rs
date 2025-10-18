@@ -42,6 +42,56 @@ impl AllwaveAligner {
     }
 }
 
+impl AllwaveAligner {
+    /// Get prioritized pair list using AllWave's sparsification
+    pub fn get_prioritized_pairs(
+        sequences: &[AlignmentSequence],
+        sparsification: SparsificationStrategy,
+        verbose: bool,
+    ) -> Result<Vec<(usize, usize)>, Box<dyn Error>> {
+        if verbose {
+            eprintln!("[allwave] Computing prioritized pair list for {} sequences", sequences.len());
+        }
+
+        // Convert to allwave format
+        let allwave_sequences: Vec<allwave::Sequence> = sequences
+            .iter()
+            .map(|s| allwave::Sequence {
+                id: s.id.clone(),
+                seq: s.seq.clone(),
+            })
+            .collect();
+
+        // Create iterator with sparsification to get prioritized pairs
+        let params = AlignmentParams {
+            match_score: 2,
+            mismatch_penalty: 4,
+            gap_open: 4,
+            gap_extend: 2,
+            gap2_open: Some(24),
+            gap2_extend: Some(1),
+            max_divergence: None,
+        };
+
+        let aligner = AllPairIterator::with_options(
+            &allwave_sequences,
+            params,
+            false, // exclude self-alignments
+            false, // don't use mash orientation
+            sparsification,
+        );
+
+        // Extract the pair list without performing alignments
+        let pairs = aligner.get_pairs();
+
+        if verbose {
+            eprintln!("[allwave] Generated {} prioritized pairs", pairs.len());
+        }
+
+        Ok(pairs)
+    }
+}
+
 impl Aligner for AllwaveAligner {
     fn align_sequences(
         &self,
