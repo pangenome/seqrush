@@ -1,5 +1,40 @@
 # SeqRush Development - Graph Construction Investigation
 
+## Iterative Alignment Feature (NEW - In Progress)
+
+### Overview
+Implementing iterative graph construction with stabilization detection to reduce computational work.
+
+### Status
+- ✅ Added `--iterative` CLI flag to seqrush.rs
+- ✅ Flag is recognized and shows in `--help` output
+- ❌ Implementation not yet ported from seqrush_clean.rs
+- ❌ Calling `--iterative` shows error message directing to implementation
+
+### Implementation Approach
+The feature uses AllWave's TreeSampling sparsification to get a prioritized pair list, then:
+1. Process pairs in priority order (k-nearest + k-farthest + random)
+2. Track union-find component count after each alignment
+3. Stop early when graph stabilizes (N consecutive checks with no change)
+
+### Technical Challenges
+**seqrush_clean.rs uses simple UFRush** while **seqrush.rs uses BidirectedUnionFind**:
+- Different union-find APIs
+- Different coordinate systems (simple vs oriented positions)
+- Different RC handling approaches
+
+### Next Steps
+1. Port `count_components()` method to work with BidirectedUnionFind
+2. Adapt `align_and_unite_iterative()` to use seqrush.rs's alignment infrastructure
+3. Test on simple sequences
+4. Benchmark work reduction vs full alignment
+5. Verify graph equivalence between iterative and full modes
+
+### Code Locations
+- **CLI flag**: src/seqrush.rs:149 (`iterative: bool`)
+- **Build integration**: src/seqrush.rs:346-353 (currently shows error message)
+- **Reference implementation**: src/seqrush_clean.rs:218-359
+
 ## Problem Statement - BIDIRECTED GRAPH IMPLEMENTED
 
 SeqRush now correctly handles bidirected graphs but still produces more nodes than seqwish:
