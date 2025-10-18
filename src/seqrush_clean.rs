@@ -56,6 +56,10 @@ pub struct Args {
     /// Aligner backend to use (allwave or sweepga)
     #[arg(short = 'A', long, default_value = "allwave")]
     pub aligner: String,
+
+    /// Use iterative alignment with stabilization detection
+    #[arg(long)]
+    pub iterative: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -102,7 +106,11 @@ impl SeqRush {
         );
 
         // Phase 1: Align all pairs and update union-find
-        self.align_and_unite(args);
+        if args.iterative {
+            self.align_and_unite_iterative(args);
+        } else {
+            self.align_and_unite(args);
+        }
 
         // Phase 2: Write graph by walking sequences through union-find
         self.write_gfa(args).expect("Failed to write GFA");

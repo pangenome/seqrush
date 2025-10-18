@@ -143,6 +143,10 @@ pub struct Args {
     /// K-mer frequency threshold for SweepGA (use k-mers occurring ≤ N times)
     #[arg(long = "frequency", short = 'f')]
     pub frequency: Option<usize>,
+
+    /// Use iterative alignment with stabilization detection
+    #[arg(long)]
+    pub iterative: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -339,7 +343,14 @@ impl SeqRush {
         );
 
         // Phase 1: Align all pairs and update union-find
-        self.align_and_unite(args);
+        if args.iterative {
+            eprintln!("ERROR: Iterative alignment mode is not yet implemented in seqrush.rs");
+            eprintln!("       This feature is available in seqrush_clean.rs but needs to be ported.");
+            eprintln!("       For now, run without --iterative flag.");
+            std::process::exit(1);
+        } else {
+            self.align_and_unite(args);
+        }
 
         // Phase 2: Write graph by walking sequences through union-find
         self.write_gfa(args).expect("Failed to write GFA");
