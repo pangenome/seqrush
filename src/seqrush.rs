@@ -847,18 +847,21 @@ impl SeqRush {
             max_divergence: None,
         };
 
-        // Get prioritized pair list from AllWave using TreeSampling
-        // k=3 for k-nearest neighbors and k-farthest
-        let pairs = AllPairIterator::with_options(
+        // Get separated pairs: tree pairs (k-nearest + k-farthest) and random pairs
+        // Tree pairs guarantee connectivity, random pairs fill in extra detail
+        let (tree_pairs, random_pairs) = allwave::knn_graph::extract_tree_pairs_separated(
             &allwave_sequences,
-            params.clone(),
-            false, // include self-alignments
-            false, // don't use mash orientation
-            SparsificationStrategy::TreeSampling(3, 3, 0.1, Some(16)),
-        )
-        .get_pairs();
+            3,    // k_nearest
+            3,    // k_farthest
+            0.1,  // random_fraction
+            16,   // kmer_size
+        );
 
-        println!("Processing {} prioritized pairs", pairs.len());
+        println!(
+            "Processing {} tree pairs (connectivity guarantee) + {} random pairs (detail)",
+            tree_pairs.len(),
+            random_pairs.len()
+        );
 
         // Create PAF writer if requested
         let paf_writer = if let Some(paf_path) = &args.output_alignments {
@@ -876,14 +879,74 @@ impl SeqRush {
             None
         };
 
-        // Track stabilization
-        let mut prev_component_count = self.total_length; // Initially all positions are separate
+        // PHASE 1: Process ALL tree pairs (no early stopping - guarantees connectivity)
+        println!("\nPhase 1: Processing tree pairs (k-nearest + k-farthest)...");
+        for (pair_idx, (i, j)) in tree_pairs.iter().enumerate() {
+            if args.verbose && (pair_idx + 1) % 10 == 0 {
+                println!("  Tree pair {}/{}", pair_idx + 1, tree_pairs.len());
+            }
+
+            // Create aligner for this specific pair
+            let pair_sequences = vec![allwave_sequences[*i].clone(), allwave_sequences[*j].clone()];
+
+            let aligner = AllPairIterator::with_options(
+                &pair_sequences,
+                params.clone(),
+                false, // include self-alignments within the pair
+                false, // don't use mash orientation
+                SparsificationStrategy::None,
+            )
+            .with_orientation_params(orientation_params.clone());
+
+            // Align this pair
+            for alignment in aligner {
+                // Write to PAF if requested
+                if let Some(writer) = &paf_writer {
+                    let paf_record = allwave::alignment_to_paf(&alignment, &pair_sequences);
+                    if let Ok(mut w) = writer.lock() {
+                        let _ = writeln!(w, "{}", paf_record);
+                    }
+                }
+
+                // Get the actual sequence indices (i and j from the pairs list)
+                // Map from pair_sequences indices (0 or 1) to original sequence indices
+                let query_idx = if alignment.query_idx == 0 { *i } else { *j };
+                let target_idx = if alignment.target_idx == 0 { *i } else { *j };
+
+                let query_seq = &self.sequences[query_idx];
+                let target_seq = &self.sequences[target_idx];
+
+                // Process alignment
+                let cigar = allwave::cigar_bytes_to_string(&alignment.cigar_bytes);
+                self.process_alignment(
+                    &cigar,
+                    query_seq,
+                    target_seq,
+                    args.min_match_length,
+                    alignment.is_reverse,
+                    0,
+                    query_seq.data.len(),
+                    0,
+                    target_seq.data.len(),
+                    args.verbose,
+                );
+            }
+        }
+
+        let post_tree_components = self.count_components();
+        println!(
+            "Phase 1 complete: {} components after tree pairs",
+            post_tree_components
+        );
+
+        // PHASE 2: Process random pairs with stabilization detection (early stopping allowed)
+        println!("\nPhase 2: Processing random pairs with early stopping...");
+        let mut prev_component_count = post_tree_components;
         let mut stable_count = 0;
         const STABILITY_THRESHOLD: usize = 10; // Stop if no change after N checks
         const CHECK_INTERVAL: usize = 10; // Check every N pairs
 
-        // Process pairs iteratively
-        for (pair_idx, (i, j)) in pairs.iter().enumerate() {
+        for (pair_idx, (i, j)) in random_pairs.iter().enumerate() {
             // Create aligner for this specific pair
             let pair_sequences = vec![allwave_sequences[*i].clone(), allwave_sequences[*j].clone()];
 
@@ -936,7 +999,7 @@ impl SeqRush {
 
                 if args.verbose {
                     println!(
-                        "After {} pairs: {} components (prev: {})",
+                        "  After {} random pairs: {} components (prev: {})",
                         pair_idx + 1,
                         component_count,
                         prev_component_count
@@ -947,14 +1010,14 @@ impl SeqRush {
                     stable_count += 1;
                     if stable_count >= STABILITY_THRESHOLD {
                         println!(
-                            "Graph stabilized after {} pairs ({} components)",
+                            "Graph stabilized after {} random pairs ({} components)",
                             pair_idx + 1,
                             component_count
                         );
                         println!(
-                            "Skipped {} pairs ({}% reduction)",
-                            pairs.len() - (pair_idx + 1),
-                            ((pairs.len() - (pair_idx + 1)) as f64 / pairs.len() as f64 * 100.0)
+                            "Skipped {} random pairs ({}% reduction)",
+                            random_pairs.len() - (pair_idx + 1),
+                            ((random_pairs.len() - (pair_idx + 1)) as f64 / random_pairs.len() as f64 * 100.0)
                         );
                         break;
                     }
@@ -973,7 +1036,7 @@ impl SeqRush {
             }
         }
 
-        println!("Final component count: {}", self.count_components());
+        println!("\nFinal component count: {}", self.count_components());
     }
 
     fn process_alignment(
