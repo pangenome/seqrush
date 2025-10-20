@@ -87,35 +87,35 @@ pub struct Args {
     pub no_sort: bool,
 
     /// Skip the path-guided SGD phase (Y) of the Ygs pipeline
-    #[arg(long = "skip-sgd", default_value = "false")]
+    #[arg(long = "skip-sgd", default_value = "false", hide = true)]
     pub skip_sgd: bool,
 
     /// Skip the grooming phase (g) of the Ygs pipeline
-    #[arg(long = "skip-groom", default_value = "false")]
+    #[arg(long = "skip-groom", default_value = "false", hide = true)]
     pub skip_groom: bool,
 
     /// Skip the topological sort phase (s) of the Ygs pipeline
-    #[arg(long = "skip-topo", default_value = "false")]
+    #[arg(long = "skip-topo", default_value = "false", hide = true)]
     pub skip_topo: bool,
 
     /// Number of SGD iterations (default: 100, matching ODGI)
-    #[arg(long = "sgd-iter-max", default_value = "100")]
+    #[arg(long = "sgd-iter-max", default_value = "100", hide = true)]
     pub sgd_iter_max: u64,
 
     /// SGD learning rate parameter eta_max (default: calculated from graph)
-    #[arg(long = "sgd-eta-max")]
+    #[arg(long = "sgd-eta-max", hide = true)]
     pub sgd_eta_max: Option<f64>,
 
     /// SGD cooling/momentum parameter theta (default: 0.99)
-    #[arg(long = "sgd-theta", default_value = "0.99")]
+    #[arg(long = "sgd-theta", default_value = "0.99", hide = true)]
     pub sgd_theta: f64,
 
     /// SGD convergence parameter eps (default: 0.01)
-    #[arg(long = "sgd-eps", default_value = "0.01")]
+    #[arg(long = "sgd-eps", default_value = "0.01", hide = true)]
     pub sgd_eps: f64,
 
     /// SGD cooling start (default: 0.5)
-    #[arg(long = "sgd-cooling-start", default_value = "0.5")]
+    #[arg(long = "sgd-cooling-start", default_value = "0.5", hide = true)]
     pub sgd_cooling_start: f64,
 
     /// [DEPRECATED] Use sort-groom-sort strategy (use --skip-* flags instead)
