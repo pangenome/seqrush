@@ -136,8 +136,8 @@ pub struct Args {
     #[arg(long = "groom", default_value = "false", hide = true)]
     pub groom: bool,
 
-    /// Aligner to use: 'allwave', 'sweepga' (default: allwave)
-    #[arg(long = "aligner", default_value = "allwave")]
+    /// Aligner to use: 'sweepga', 'allwave' (default: sweepga)
+    #[arg(long = "aligner", default_value = "sweepga")]
     pub aligner: String,
 
     /// K-mer frequency threshold for SweepGA (use k-mers occurring ≤ N times)

@@ -32,7 +32,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Clone and build
 git clone --recursive https://github.com/pangenome/seqrush.git
 cd seqrush
-cargo build --release --features use-allwave
+cargo build --release --features use-sweepga
 
 # Build a graph from sequences
 ./target/release/seqrush -s input.fa -o output.gfa -k 0
@@ -53,7 +53,7 @@ odgi stats -i output.gfa -S
 ```bash
 git clone --recursive https://github.com/pangenome/seqrush.git
 cd seqrush
-cargo build --release --features use-allwave
+cargo build --release --features use-sweepga
 ```
 
 The binary will be available at `target/release/seqrush`.
@@ -63,11 +63,11 @@ The binary will be available at `target/release/seqrush`.
 ### Basic Usage
 
 ```bash
-# Build graph with default AllWave aligner
+# Build graph with default SweepGA aligner
 ./target/release/seqrush -s sequences.fa -o graph.gfa -k 0
 
-# Use SweepGA aligner instead
-./target/release/seqrush -s sequences.fa -o graph.gfa -k 0 --aligner sweepga
+# Use AllWave aligner instead (slower but works with shorter sequences)
+./target/release/seqrush -s sequences.fa -o graph.gfa -k 0 --aligner allwave
 
 # Enable iterative alignment for large datasets
 ./target/release/seqrush -s sequences.fa -o graph.gfa -k 0 --iterative
@@ -233,7 +233,7 @@ If you use SeqRush in your research, please cite:
 
 ```
 SeqRush: Fast bidirected pangenome graph construction
-Erik Garrison, Kristopher Kubicki, 2025
+Erik Garrison, 2025
 https://github.com/pangenome/seqrush
 ```
 
@@ -243,10 +243,10 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-SeqRush is inspired by and builds upon:
+SeqRush builds upon:
 - [seqwish](https://github.com/ekg/seqwish) - Original pangenome graph construction algorithm
 - [ODGI](https://github.com/pangenome/odgi) - Optimized dynamic genome/graph implementation
+- [FastGA](https://github.com/thegenemyers/FASTGA) - Fast genome aligner by Gene Myers
+- [SweepGA](https://github.com/pangenome/sweepga) - Plane sweep filtering wrapper for FastGA
 - [AllWave](https://github.com/urbanslug/allwave) - Wavefront-based sequence aligner
 - [WFA2-lib](https://github.com/smarco/WFA2-lib) - Wavefront alignment algorithm library
-
-Special thanks to Erik Garrison for the seqwish algorithm and graph construction concepts.
