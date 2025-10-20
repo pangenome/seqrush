@@ -106,6 +106,7 @@ fn test_base_case_empty() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -170,6 +171,7 @@ fn test_base_case_single_base() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -281,6 +283,7 @@ fn test_identical_sequences_share_nodes() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -346,6 +349,7 @@ fn test_inductive_sequence_extension() {
             groom: false,
         aligner: "allwave".to_string(),
             frequency: None,
+            iterative: false,
         };
 
         run_seqrush_bidirected_simple(args).unwrap();
@@ -455,6 +459,7 @@ fn test_path_reconstruction_correctness() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -525,6 +530,7 @@ fn test_edge_connectivity() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -594,6 +600,7 @@ fn test_palindromic_sequences() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -650,6 +657,7 @@ fn test_union_find_with_matches() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -718,6 +726,7 @@ fn test_large_sequences() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -775,6 +784,7 @@ fn test_transitivity_of_matches() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

@@ -57,6 +57,7 @@ fn test_real_inversion_case() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     println!("Testing real inversion case...");
@@ -115,6 +116,7 @@ fn test_larger_inversion_with_unique_content() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     println!("\nTesting larger inversion with unique content...");
@@ -172,6 +174,7 @@ fn test_inversion_with_snps() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     println!("\nTesting inversion detection with SNPs...");

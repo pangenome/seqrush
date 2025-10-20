@@ -48,6 +48,7 @@ fn test_sorting_creates_sequential_node_ids() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
     
     run_seqrush(args_sorted).unwrap();
@@ -85,6 +86,7 @@ fn test_sorting_creates_sequential_node_ids() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
     
     run_seqrush(args_unsorted).unwrap();
@@ -199,6 +201,7 @@ fn test_sorting_preserves_graph_structure() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
     
     run_seqrush(args_sorted).unwrap();
@@ -236,6 +239,7 @@ fn test_sorting_preserves_graph_structure() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
     
     run_seqrush(args_unsorted).unwrap();

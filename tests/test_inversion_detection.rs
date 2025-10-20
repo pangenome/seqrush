@@ -56,6 +56,7 @@ fn test_inversion_detection_simple() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     println!("Running inversion-aware alignment...");
@@ -134,6 +135,7 @@ fn test_inversion_detection_with_context() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     println!("\nRunning inversion detection with context...");
@@ -192,6 +194,7 @@ fn test_no_inversion() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -248,6 +251,7 @@ fn test_multiple_inversions() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     println!("\nRunning multiple inversion detection...");

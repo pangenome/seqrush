@@ -112,6 +112,7 @@ fn test_inverted_repeats() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -182,6 +183,7 @@ fn test_complex_cnv_repeats() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -249,6 +251,7 @@ fn test_y_shaped_breakpoint() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -310,6 +313,7 @@ fn test_nested_inversions() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -382,6 +386,7 @@ fn test_random_rearrangements() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -455,6 +460,7 @@ fn test_tandem_repeat_polymorphism() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -523,6 +529,7 @@ fn test_complex_nested_variations() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -595,6 +602,7 @@ fn test_interspersed_repeats_with_inversions() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -674,6 +682,7 @@ fn test_breakpoint_resolution() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();

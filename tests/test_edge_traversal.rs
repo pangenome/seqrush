@@ -58,6 +58,7 @@ fn test_no_untraversed_edges_in_output() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush(args).unwrap();
@@ -141,6 +142,7 @@ fn test_self_loops_in_gfa() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush(args).unwrap();
@@ -215,6 +217,7 @@ fn test_complex_graph_produces_valid_gfa() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush(args).unwrap();

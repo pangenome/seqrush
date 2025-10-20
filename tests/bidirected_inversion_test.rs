@@ -56,6 +56,7 @@ fn test_simple_inversion() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -144,6 +145,7 @@ fn test_complex_rearrangement() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -240,6 +242,7 @@ fn test_self_inverse_palindrome() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();

@@ -67,6 +67,7 @@ fn test_performance_scaling() {
             groom: false,
         aligner: "allwave".to_string(),
             frequency: None,
+            iterative: false,
         };
 
         let start = Instant::now();
@@ -168,6 +169,7 @@ fn test_real_world_example() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush(args).unwrap();
@@ -222,6 +224,7 @@ fn test_command_line_interface() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush(args).unwrap();
@@ -288,6 +291,7 @@ fn test_parallel_consistency() {
             groom: false,
         aligner: "allwave".to_string(),
             frequency: None,
+            iterative: false,
         };
 
         run_seqrush(args).unwrap();

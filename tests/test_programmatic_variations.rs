@@ -203,6 +203,7 @@ fn test_programmatic_inversions_scale() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -281,6 +282,7 @@ fn test_gc_content_variation() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_seqrush_bidirected_simple(args).unwrap();
@@ -375,6 +377,7 @@ fn test_motif_based_variations() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -460,6 +463,7 @@ fn test_microsatellite_instability() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -547,6 +551,7 @@ fn test_complex_structural_variation_patterns() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
@@ -645,6 +650,7 @@ fn test_nested_tandem_inversions() {
             groom: false,
         aligner: "allwave".to_string(),
         frequency: None,
+        iterative: false,
     };
 
     run_inversion_aware_seqrush(args).unwrap();
