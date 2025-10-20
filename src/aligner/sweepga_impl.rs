@@ -140,11 +140,9 @@ impl Aligner for SweepgaAligner {
             eprintln!("[sweepga] FastGA produced {} raw alignments", line_count);
         }
 
-        // Step 3: Apply plane sweep filtering with 1:1 mode for graph construction
-        // This keeps one best mapping per query-target pair while allowing
-        // multiple mappings per sequence (needed for graph construction)
+        // Step 3: Apply 1:1 plane sweep filtering for clean graph construction
         if self.verbose {
-            eprintln!("[sweepga] Applying plane sweep filtering (1:1 mode)...");
+            eprintln!("[sweepga] Applying 1:1 plane sweep filtering...");
         }
 
         let filter_config = FilterConfig {
@@ -153,8 +151,8 @@ impl Aligner for SweepgaAligner {
             mapping_max_per_target: Some(1),
             scoring_function: ScoringFunction::LogLengthIdentity,
             overlap_threshold: 0.95,
-            min_block_length: 0,  // Keep all alignments (no length filter for graph construction)
-            scaffold_filter_mode: FilterMode::ManyToMany,
+            min_block_length: 100,  // Filter out very short alignments
+            scaffold_filter_mode: FilterMode::ManyToMany,  // No scaffolding
             scaffold_max_per_query: None,
             scaffold_max_per_target: None,
             plane_sweep_secondaries: 0,
