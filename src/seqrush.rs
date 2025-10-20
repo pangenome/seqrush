@@ -8,6 +8,7 @@ use clap::Parser;
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::Arc;
@@ -64,8 +65,9 @@ pub struct Args {
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
 
-    /// Sparsification factor (keep this fraction of alignment pairs, 1.0 = keep all, 'auto' for automatic)
-    #[arg(short = 'x', long = "sparsify", default_value = "1.0")]
+    /// Sparsification strategy: 'none', 'auto', 'random:F', 'connectivity:F', 'tree:K,K2,F,SIZE'
+    /// Examples: 'none' (all pairs), 'random:0.5' (50% random), 'tree:3,3,0.1,16' (tree sampling)
+    #[arg(short = 'x', long = "sparsify", default_value = "none")]
     pub sparsification: String,
 
     /// Output alignments to PAF file
@@ -352,6 +354,63 @@ impl SeqRush {
         representatives.len()
     }
 
+    /// Parse sparsification strategy from string
+    fn parse_sparsification(s: &str) -> Result<SparsificationStrategy, Box<dyn Error>> {
+        match s {
+            "none" | "1.0" => Ok(SparsificationStrategy::None),
+            "auto" => Ok(SparsificationStrategy::Auto),
+            s if s.starts_with("random:") => {
+                let factor: f64 = s[7..].parse()
+                    .map_err(|_| format!("Invalid random factor: {}", s))?;
+                if factor > 0.0 && factor <= 1.0 {
+                    Ok(SparsificationStrategy::Random(factor))
+                } else {
+                    Err(format!("Random factor must be in (0.0, 1.0], got {}", factor).into())
+                }
+            }
+            s if s.starts_with("connectivity:") => {
+                let prob: f64 = s[13..].parse()
+                    .map_err(|_| format!("Invalid connectivity probability: {}", s))?;
+                if prob > 0.0 && prob <= 1.0 {
+                    Ok(SparsificationStrategy::Connectivity(prob))
+                } else {
+                    Err(format!("Connectivity probability must be in (0.0, 1.0], got {}", prob).into())
+                }
+            }
+            s if s.starts_with("tree:") => {
+                let parts: Vec<&str> = s[5..].split(',').collect();
+                if parts.len() != 4 {
+                    return Err(format!("Tree sampling requires 4 values: tree:K_NEAR,K_FAR,RAND_FRAC,KMER_SIZE, got {}", s).into());
+                }
+                let k_nearest: usize = parts[0].parse()
+                    .map_err(|_| format!("Invalid k_nearest: {}", parts[0]))?;
+                let k_farthest: usize = parts[1].parse()
+                    .map_err(|_| format!("Invalid k_farthest: {}", parts[1]))?;
+                let rand_frac: f64 = parts[2].parse()
+                    .map_err(|_| format!("Invalid random_fraction: {}", parts[2]))?;
+                let kmer_size: usize = parts[3].parse()
+                    .map_err(|_| format!("Invalid kmer_size: {}", parts[3]))?;
+
+                if rand_frac < 0.0 || rand_frac > 1.0 {
+                    return Err(format!("Random fraction must be in [0.0, 1.0], got {}", rand_frac).into());
+                }
+                if kmer_size == 0 {
+                    return Err("Kmer size must be > 0".into());
+                }
+
+                Ok(SparsificationStrategy::TreeSampling(k_nearest, k_farthest, rand_frac, Some(kmer_size)))
+            }
+            // Backward compatibility: treat plain float as random factor
+            s => match s.parse::<f64>() {
+                Ok(factor) if factor > 0.0 && factor <= 1.0 => {
+                    eprintln!("Warning: Plain float deprecated. Use 'random:{}' instead", factor);
+                    Ok(SparsificationStrategy::Random(factor))
+                }
+                _ => Err(format!("Invalid sparsification: '{}'. Use 'none', 'auto', 'random:F', 'connectivity:F', or 'tree:K,K2,F,SIZE'", s).into())
+            }
+        }
+    }
+
     pub fn build_graph(&mut self, args: &Args) {
         println!(
             "Building graph with {} sequences (total length: {})",
@@ -588,21 +647,12 @@ impl SeqRush {
         };
 
         // Parse sparsification strategy
-        let sparsification = match args.sparsification.as_str() {
-            "1.0" => SparsificationStrategy::None,
-            "auto" => SparsificationStrategy::Auto,
-            s => match s.parse::<f64>() {
-                Ok(factor) if factor > 0.0 && factor <= 1.0 => {
-                    SparsificationStrategy::Random(factor)
-                }
-                _ => {
-                    eprintln!(
-                        "Invalid sparsification factor: {}. Using 1.0 (no sparsification)",
-                        s
-                    );
-                    SparsificationStrategy::None
-                }
-            },
+        let sparsification = match Self::parse_sparsification(&args.sparsification) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error parsing sparsification: {}. Using 'none'", e);
+                SparsificationStrategy::None
+            }
         };
 
         // Create PAF writer if requested
@@ -847,20 +897,43 @@ impl SeqRush {
             max_divergence: None,
         };
 
+        // Parse sparsification strategy - use tree sampling if specified, otherwise default
+        let sparsification = match Self::parse_sparsification(&args.sparsification) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error parsing sparsification: {}. Using default tree:3,3,0.1,16", e);
+                SparsificationStrategy::TreeSampling(3, 3, 0.1, Some(16))
+            }
+        };
+
+        // Extract tree sampling parameters or use defaults
+        let (k_nearest, k_farthest, rand_frac, kmer_size) = match sparsification {
+            SparsificationStrategy::TreeSampling(k, k_far, rf, Some(ks)) => (k, k_far, rf, ks),
+            SparsificationStrategy::TreeSampling(k, k_far, rf, None) => (k, k_far, rf, 16),
+            _ => {
+                // Default to tree sampling for iterative mode
+                eprintln!("Note: Iterative mode works best with tree sampling. Using default tree:3,3,0.1,16");
+                (3, 3, 0.1, 16)
+            }
+        };
+
         // Get separated pairs: tree pairs (k-nearest + k-farthest) and random pairs
         // Tree pairs guarantee connectivity, random pairs fill in extra detail
         let (tree_pairs, random_pairs) = allwave::knn_graph::extract_tree_pairs_separated(
             &allwave_sequences,
-            3,    // k_nearest
-            3,    // k_farthest
-            0.1,  // random_fraction
-            16,   // kmer_size
+            k_nearest,
+            k_farthest,
+            rand_frac,
+            kmer_size,
         );
 
         println!(
-            "Processing {} tree pairs (connectivity guarantee) + {} random pairs (detail)",
+            "Processing {} tree pairs (k={}, k_far={}) + {} random pairs (frac={})",
             tree_pairs.len(),
-            random_pairs.len()
+            k_nearest,
+            k_farthest,
+            random_pairs.len(),
+            rand_frac
         );
 
         // Create PAF writer if requested
