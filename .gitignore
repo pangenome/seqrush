@@ -60,6 +60,10 @@ EOF < /dev/null
 seqwish/
 seqwish-paper/
 
+# Seqwish/wfmash temporary working directories
+seqwish-*/
+wfmash-*/
+
 # HLA-ZOO results directory
 hla_zoo_results/
 process_hla_zoo.sh
