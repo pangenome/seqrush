@@ -11,7 +11,7 @@ fn test_forward_reverse_unification() {
         offset: 0,
     };
 
-    let seqrush = SeqRush::new(vec![seq], 0);
+    let seqrush = SeqRush::new(vec![seq]);
 
     // Check that forward and reverse of each position have the same representative
     for i in 0..4 {
@@ -52,7 +52,7 @@ fn test_transitive_closure() {
         offset: 8,
     };
 
-    let seqrush = SeqRush::new(vec![seq1, seq2, seq3], 0);
+    let seqrush = SeqRush::new(vec![seq1, seq2, seq3]);
 
     // Unite seq1[0] with seq2[0]
     seqrush
@@ -90,7 +90,7 @@ fn test_single_component_per_position() {
         },
     ];
 
-    let seqrush = SeqRush::new(sequences, 0);
+    let seqrush = SeqRush::new(sequences);
 
     // Unite matching positions
     seqrush
@@ -132,7 +132,7 @@ fn test_reverse_complement_alignment() {
         offset: 4,
     };
 
-    let seqrush = SeqRush::new(vec![seq1, seq2], 0);
+    let seqrush = SeqRush::new(vec![seq1, seq2]);
 
     // seq1 aligns to seq2 via reverse complement
     // seq1[0..4] RC aligns to seq2[0..4]
@@ -186,7 +186,7 @@ fn test_identical_sequences_produce_minimal_components() {
         },
     ];
 
-    let seqrush = SeqRush::new(sequences, 0);
+    let seqrush = SeqRush::new(sequences);
 
     // Unite all matching positions
     seqrush
@@ -230,7 +230,7 @@ fn test_no_false_unifications() {
         },
     ];
 
-    let seqrush = SeqRush::new(sequences, 0);
+    let seqrush = SeqRush::new(sequences);
 
     // Without any alignments, positions from different sequences should not be united
     let pos1 = make_pos(0, false);
@@ -264,7 +264,7 @@ fn test_partial_alignment() {
         offset: 12,
     };
 
-    let seqrush = SeqRush::new(vec![seq1, seq2], 0);
+    let seqrush = SeqRush::new(vec![seq1, seq2]);
 
     // Only the GGGG region matches (positions 4-7 in seq1, 4-7 in seq2)
     seqrush

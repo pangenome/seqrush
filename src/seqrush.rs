@@ -65,8 +65,8 @@ pub struct Args {
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
 
-    /// Sparsification strategy: 'none', 'auto', 'random:F', 'connectivity:F', 'tree:K,K2,F,SIZE'
-    /// Examples: 'none' (all pairs), 'random:0.5' (50% random), 'tree:3,3,0.1,16' (tree sampling)
+    /// Sparsification strategy: 'none', 'auto', 'random:F', 'connectivity:F', 'tree:neighbor,stranger,random,k-mer'
+    /// Examples: 'none' (all pairs), 'random:0.5' (50% random), 'tree:3,3,0.1,16' (3 nearest, 3 farthest, 10% random, k=16)
     #[arg(short = 'x', long = "sparsify", default_value = "none")]
     pub sparsification: String,
 
@@ -299,14 +299,13 @@ pub struct SeqRush {
     pub sequences: Vec<Sequence>,
     pub total_length: usize,
     pub union_find: BidirectedUnionFind,
-    pub sparsity_threshold: u64,
     /// Maps each position to its orientation relative to its union representative
     /// true = reverse orientation relative to representative
     pub orientation_map: HashMap<Pos, bool>,
 }
 
 impl SeqRush {
-    pub fn new(sequences: Vec<Sequence>, sparsity_threshold: u64) -> Self {
+    pub fn new(sequences: Vec<Sequence>) -> Self {
         // Validate that no sequences are empty
         for seq in &sequences {
             if seq.data.is_empty() {
@@ -332,7 +331,6 @@ impl SeqRush {
             sequences,
             total_length,
             union_find,
-            sparsity_threshold,
             orientation_map: HashMap::new(),
         }
     }
@@ -380,16 +378,16 @@ impl SeqRush {
             s if s.starts_with("tree:") => {
                 let parts: Vec<&str> = s[5..].split(',').collect();
                 if parts.len() != 4 {
-                    return Err(format!("Tree sampling requires 4 values: tree:K_NEAR,K_FAR,RAND_FRAC,KMER_SIZE, got {}", s).into());
+                    return Err(format!("Tree sampling requires 4 values: tree:neighbor,stranger,random,k-mer, got {}", s).into());
                 }
                 let k_nearest: usize = parts[0].parse()
-                    .map_err(|_| format!("Invalid k_nearest: {}", parts[0]))?;
+                    .map_err(|_| format!("Invalid neighbor count: {}", parts[0]))?;
                 let k_farthest: usize = parts[1].parse()
-                    .map_err(|_| format!("Invalid k_farthest: {}", parts[1]))?;
+                    .map_err(|_| format!("Invalid stranger count: {}", parts[1]))?;
                 let rand_frac: f64 = parts[2].parse()
-                    .map_err(|_| format!("Invalid random_fraction: {}", parts[2]))?;
+                    .map_err(|_| format!("Invalid random fraction: {}", parts[2]))?;
                 let kmer_size: usize = parts[3].parse()
-                    .map_err(|_| format!("Invalid kmer_size: {}", parts[3]))?;
+                    .map_err(|_| format!("Invalid k-mer size: {}", parts[3]))?;
 
                 if rand_frac < 0.0 || rand_frac > 1.0 {
                     return Err(format!("Random fraction must be in [0.0, 1.0], got {}", rand_frac).into());
@@ -406,7 +404,7 @@ impl SeqRush {
                     eprintln!("Warning: Plain float deprecated. Use 'random:{}' instead", factor);
                     Ok(SparsificationStrategy::Random(factor))
                 }
-                _ => Err(format!("Invalid sparsification: '{}'. Use 'none', 'auto', 'random:F', 'connectivity:F', or 'tree:K,K2,F,SIZE'", s).into())
+                _ => Err(format!("Invalid sparsification: '{}'. Use 'none', 'auto', 'random:F', 'connectivity:F', or 'tree:neighbor,stranger,random,k-mer'", s).into())
             }
         }
     }
@@ -1826,41 +1824,7 @@ pub fn run_seqrush(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let sequences = load_sequences(&args.sequences)?;
     println!("Loaded {} sequences", sequences.len());
 
-    // Calculate sparsification threshold
-    let sparsity_threshold = if args.sparsification == "auto" {
-        // Use Erdős-Rényi model: keep 10 * log(n) / n fraction of alignment pairs
-        let n = sequences.len() as f64;
-        let fraction = (10.0 * n.ln() / n).min(1.0);
-        println!(
-            "Auto sparsification: keeping {:.2}% of alignment pairs (n={})",
-            fraction * 100.0,
-            sequences.len()
-        );
-        (fraction * u64::MAX as f64) as u64
-    } else {
-        match args.sparsification.parse::<f64>() {
-            Ok(frac) if (0.0..=1.0).contains(&frac) => {
-                if frac == 1.0 {
-                    u64::MAX
-                } else {
-                    println!(
-                        "Sparsification: keeping {:.2}% of alignment pairs",
-                        frac * 100.0
-                    );
-                    (frac * u64::MAX as f64) as u64
-                }
-            }
-            _ => {
-                eprintln!(
-                    "Invalid sparsification value: {}. Using 1.0 (no sparsification)",
-                    args.sparsification
-                );
-                u64::MAX
-            }
-        }
-    };
-
-    let mut seqrush = SeqRush::new(sequences, sparsity_threshold);
+    let mut seqrush = SeqRush::new(sequences);
     seqrush.build_graph(&args);
 
     println!("Graph written to {}", args.output);

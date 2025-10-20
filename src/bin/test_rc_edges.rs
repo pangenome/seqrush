@@ -19,7 +19,7 @@ fn main() {
         offset: 4,
     };
     
-    let mut seqrush = SeqRush::new(vec![seq1, seq2], 0);
+    let mut seqrush = SeqRush::new(vec![seq1, seq2]);
     
     // Unite them via RC alignment
     // When seq1 is RC'd, it becomes CGAT which matches seq2
