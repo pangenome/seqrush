@@ -18,7 +18,7 @@ fn main() {
         offset: 5,
     };
     
-    let mut seqrush = SeqRush::new(vec![seq1, seq2], 0);
+    let mut seqrush = SeqRush::new(vec![seq1, seq2]);
     
     // Unite some positions to create shared nodes
     // Make it so node 2 and 3 are shared between sequences
