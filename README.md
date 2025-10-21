@@ -16,7 +16,7 @@ SeqRush constructs pangenome variation graphs by:
 ## Features
 
 - **Bidirected Graph Support**: Properly handles forward and reverse complement alignments
-- **Multiple Alignment Backends**: AllWave (wavefront-based) and SweepGA (sweep-line genetic algorithm)
+- **Multiple Alignment Backends**: AllWave (wavefront-based) and SweepGA (FastGA + plane sweep filtering)
 - **Sparsification Strategies**: TreeSampling for intelligent pair selection (k-nearest + k-farthest + random)
 - **Iterative Alignment**: Optional two-phase alignment with early stopping for large datasets
 - **Graph Layout Optimization**: Integrated Ygs pipeline (path-guided SGD + grooming + topological sort)
