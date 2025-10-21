@@ -65,8 +65,8 @@ pub struct Args {
     #[arg(long = "no-compact", default_value = "false")]
     pub no_compact: bool,
 
-    /// Sparsification strategy: 'none', 'auto', 'random:F', 'connectivity:F', 'tree:neighbor,stranger,random,k-mer'
-    /// Examples: 'none' (all pairs), 'random:0.5' (50% random), 'tree:3,3,0.1,16' (3 nearest, 3 farthest, 10% random, k=16)
+    /// Sparsification strategy: 'none', 'auto', 'random:F', 'connectivity:F', 'tree:neighbor[,stranger[,random[,k-mer]]]'
+    /// Examples: 'none' (all pairs), 'random:0.5' (50% random), 'tree:3' (3 nearest), 'tree:3,2' (3 nearest, 2 farthest), 'tree:3,3,0.1,16' (full)
     #[arg(short = 'x', long = "sparsify", default_value = "none")]
     pub sparsification: String,
 
@@ -377,24 +377,45 @@ impl SeqRush {
             }
             s if s.starts_with("tree:") => {
                 let parts: Vec<&str> = s[5..].split(',').collect();
-                if parts.len() != 4 {
-                    return Err(format!("Tree sampling requires 4 values: tree:neighbor,stranger,random,k-mer, got {}", s).into());
+                if parts.is_empty() || parts.len() > 4 {
+                    return Err(format!("Tree sampling requires 1-4 values: tree:neighbor[,stranger[,random[,k-mer]]], got {}", s).into());
                 }
+
+                // Parse neighbor (required)
                 let k_nearest: usize = parts[0].parse()
                     .map_err(|_| format!("Invalid neighbor count: {}", parts[0]))?;
-                let k_farthest: usize = parts[1].parse()
-                    .map_err(|_| format!("Invalid stranger count: {}", parts[1]))?;
-                let rand_frac: f64 = parts[2].parse()
-                    .map_err(|_| format!("Invalid random fraction: {}", parts[2]))?;
-                let kmer_size: usize = parts[3].parse()
-                    .map_err(|_| format!("Invalid k-mer size: {}", parts[3]))?;
 
-                if rand_frac < 0.0 || rand_frac > 1.0 {
-                    return Err(format!("Random fraction must be in [0.0, 1.0], got {}", rand_frac).into());
-                }
-                if kmer_size == 0 {
-                    return Err("Kmer size must be > 0".into());
-                }
+                // Parse stranger (default: 0)
+                let k_farthest: usize = if parts.len() >= 2 {
+                    parts[1].parse()
+                        .map_err(|_| format!("Invalid stranger count: {}", parts[1]))?
+                } else {
+                    0
+                };
+
+                // Parse random fraction (default: 0.0)
+                let rand_frac: f64 = if parts.len() >= 3 {
+                    let frac = parts[2].parse()
+                        .map_err(|_| format!("Invalid random fraction: {}", parts[2]))?;
+                    if frac < 0.0 || frac > 1.0 {
+                        return Err(format!("Random fraction must be in [0.0, 1.0], got {}", frac).into());
+                    }
+                    frac
+                } else {
+                    0.0
+                };
+
+                // Parse k-mer size (default: 16)
+                let kmer_size: usize = if parts.len() >= 4 {
+                    let size = parts[3].parse()
+                        .map_err(|_| format!("Invalid k-mer size: {}", parts[3]))?;
+                    if size == 0 {
+                        return Err("K-mer size must be > 0".into());
+                    }
+                    size
+                } else {
+                    16
+                };
 
                 Ok(SparsificationStrategy::TreeSampling(k_nearest, k_farthest, rand_frac, Some(kmer_size)))
             }
@@ -404,7 +425,7 @@ impl SeqRush {
                     eprintln!("Warning: Plain float deprecated. Use 'random:{}' instead", factor);
                     Ok(SparsificationStrategy::Random(factor))
                 }
-                _ => Err(format!("Invalid sparsification: '{}'. Use 'none', 'auto', 'random:F', 'connectivity:F', or 'tree:neighbor,stranger,random,k-mer'", s).into())
+                _ => Err(format!("Invalid sparsification: '{}'. Use 'none', 'auto', 'random:F', 'connectivity:F', or 'tree:neighbor[,stranger[,random[,k-mer]]]'", s).into())
             }
         }
     }
